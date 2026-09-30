@@ -110,6 +110,7 @@
 - Tom Lippincott
 - Peter Ljunglöf
 - Alex Louden
+- David Lukeš
 - Joseph Lynch
 - Nitin Madnani
 - Felipe Madrigal
@@ -127,6 +128,7 @@
 - David McClosky
 - Xinfan Meng
 - Dmitrijs Milajevs
+- Matt Miller
 - Margaret Mitchell
 - Tomonori Nagano
 - Jason Narad
@@ -176,6 +178,7 @@
 - Louis Tiao
 - Steven Tomcavage
 - Tiago Tresoldi
+- UnbearableFate
 - Marcus Uneson
 - Yu Usami
 - Petro Verkhogliad
@@ -201,6 +204,7 @@
 - Álvaro Justen <https://github.com/turicas>
 - bjut-hz
 - Sergio Oller
+- Izam Mohammed <https://github.com/izam-mohammed>
 - Will Monroe
 - Elijah Rippeth
 - Emil Manukyan
@@ -287,6 +291,37 @@
 - Yuta Nakamura <https://github.com/yutanakamura-tky>
 - Adam Hawley <https://github.com/adamjhawley>
 - Panagiotis Simakis <https://github.com/sp1thas>
+- Richard Wang <https://github.com/richarddwang>
+- Alexandre Perez-Lebel <https://github.com/aperezlebel>
+- Fernando Carranza <https://github.com/fernandocar86>
+- Martin Kondratzky <https://github.com/martinkondra>
+- Heungson Lee <https://github.com/heungson>
+- M.K. Pawelkiewicz <https://github.com/hamiltonianflow>
+- Steven Thomas Smith <https://github.com/essandess>
+- Jan Lennartz <https://github.com/Madnex>
+- Tim Sockel <https://github.com/TiMauzi>
+- Ikram Ul Haq <https://github.com/ulhaqi12>
+- Akihiro Yamazaki <https://github.com/zakkie>
+- Ron Urbach <https://github.com/sharpblade4>
+- Vivek Kalyan <https://github.com/vivekkalyan>
+- Tom Strange https://github.com/strangetom
+- Vincent Peth <https://github.com/ShadokDuBas>
+- Samer Masterson <https://github.com/samertm>
+- William LaCroix <https://github.com/WilliamPLaCroix>
+- Peter de Blanc <https://github.com/pdeblanc>
+- Jose Cols <https://github.com/josecols>
+- Christopher Smith <https://github.com/smithct2>
+- scruge1 <https://github.com/scruge1>
+- Ryan Mannion <https://github.com/ryanamannion>
+- Peter Pollak <https://github.com/Syzygy2048/>
+- John Winstead <https://github.com/jhnwnstd/>
+- Bradley Erickson <https://github.com/13rac1>
+- Volodymyr Matsko <https://github.com/Lemm1>
+- Nicola <https://github.com/trinik15>
+- medisean <https://github.com/medisean>
+- tandede <https://github.com/tandede>
+- vzer200 <https://github.com/vzer200>
+- 区梓灏 <https://github.com/Nicholas022400701>
 
 ## Others whose work we've taken and included in NLTK, but who didn't directly contribute it:
 

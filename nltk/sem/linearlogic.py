@@ -2,12 +2,13 @@
 #
 # Author: Dan Garrette <dhgarrette@gmail.com>
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # URL: <https://www.nltk.org/>
 # For license information, see LICENSE.TXT
 
 from nltk.internals import Counter
 from nltk.sem.logic import APP, LogicParser
+from nltk.termsec import safe_print
 
 _counter = Counter()
 
@@ -72,7 +73,6 @@ class LinearLogicParser(LogicParser):
 
 
 class Expression:
-
     _linear_logic_parser = LinearLogicParser()
 
     @classmethod
@@ -376,7 +376,7 @@ class BindingDict:
             bindings = bindings.items()
 
         if bindings:
-            for (v, b) in bindings:
+            for v, b in bindings:
                 self[v] = b
 
     def __setitem__(self, variable, binding):
@@ -468,14 +468,14 @@ class LinearLogicApplicationException(Exception):
 def demo():
     lexpr = Expression.fromstring
 
-    print(lexpr(r"f"))
-    print(lexpr(r"(g -o f)"))
-    print(lexpr(r"((g -o G) -o G)"))
-    print(lexpr(r"g -o h -o f"))
-    print(lexpr(r"(g -o f)(g)").simplify())
-    print(lexpr(r"(H -o f)(g)").simplify())
-    print(lexpr(r"((g -o G) -o G)((g -o f))").simplify())
-    print(lexpr(r"(H -o H)((g -o f))").simplify())
+    safe_print(lexpr(r"f"))
+    safe_print(lexpr(r"(g -o f)"))
+    safe_print(lexpr(r"((g -o G) -o G)"))
+    safe_print(lexpr(r"g -o h -o f"))
+    safe_print(lexpr(r"(g -o f)(g)").simplify())
+    safe_print(lexpr(r"(H -o f)(g)").simplify())
+    safe_print(lexpr(r"((g -o G) -o G)((g -o f))").simplify())
+    safe_print(lexpr(r"(H -o H)((g -o f))").simplify())
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 #
 # Author: Dan Garrette <dhgarrette@gmail.com>
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # URL: <https://www.nltk.org/>
 # For license information, see LICENSE.TXT
 
@@ -12,11 +12,12 @@ top of the typed lambda calculus.
 """
 
 import operator
-import re
 from collections import defaultdict
 from functools import reduce, total_ordering
 
+from nltk import redos
 from nltk.internals import Counter
+from nltk.termsec import safe_print
 from nltk.util import Trie
 
 APP = "APP"
@@ -33,6 +34,8 @@ class Tokens:
     EXISTS_LIST = ["some", "exists", "exist"]
     ALL = "all"
     ALL_LIST = ["all", "forall"]
+    IOTA = "iota"
+    IOTA_LIST = ["iota"]
 
     # Punctuation
     DOT = "."
@@ -58,13 +61,13 @@ class Tokens:
 
     # Collections of tokens
     BINOPS = AND_LIST + OR_LIST + IMP_LIST + IFF_LIST
-    QUANTS = EXISTS_LIST + ALL_LIST
+    QUANTS = EXISTS_LIST + ALL_LIST + IOTA_LIST
     PUNCT = [DOT, OPEN, CLOSE, COMMA]
 
     TOKENS = BINOPS + EQ_LIST + NEQ_LIST + QUANTS + LAMBDA_LIST + PUNCT + NOT_LIST
 
     # Special
-    SYMBOLS = [x for x in TOKENS if re.match(r"^[-\\.(),!&^|>=<]*$", x)]
+    SYMBOLS = [x for x in TOKENS if redos.match(r"^[-\\.(),!&^|>=<]*$", x)]
 
 
 def boolean_ops():
@@ -73,7 +76,7 @@ def boolean_ops():
     """
     names = ["negation", "conjunction", "disjunction", "implication", "equivalence"]
     for pair in zip(names, [Tokens.NOT, Tokens.AND, Tokens.OR, Tokens.IMP, Tokens.IFF]):
-        print("%-15s\t%s" % pair)
+        safe_print("%-15s\t%s" % pair)
 
 
 def equality_preds():
@@ -82,7 +85,7 @@ def equality_preds():
     """
     names = ["equality", "inequality"]
     for pair in zip(names, [Tokens.EQ, Tokens.NEQ]):
-        print("%-15s\t%s" % pair)
+        safe_print("%-15s\t%s" % pair)
 
 
 def binding_ops():
@@ -90,12 +93,19 @@ def binding_ops():
     Binding operators
     """
     names = ["existential", "universal", "lambda"]
-    for pair in zip(names, [Tokens.EXISTS, Tokens.ALL, Tokens.LAMBDA]):
-        print("%-15s\t%s" % pair)
+    for pair in zip(names, [Tokens.EXISTS, Tokens.ALL, Tokens.LAMBDA, Tokens.IOTA]):
+        safe_print("%-15s\t%s" % pair)
 
 
 class LogicParser:
     """A lambda calculus expression parser."""
+
+    #: Maximum expression-nesting depth the recursive-descent parser will
+    #: descend to. Deeply nested input would otherwise recurse until Python
+    #: raises an uncaught ``RecursionError`` and crashes the caller
+    #: (uncontrolled recursion, CWE-674); past this depth a normal
+    #: ``LogicalExpressionException`` is raised instead. Configurable.
+    MAX_PARSE_DEPTH = 200
 
     def __init__(self, type_check=False):
         """
@@ -107,6 +117,7 @@ class LogicParser:
 
         self._currentIndex = 0
         self._buffer = []
+        self._parse_depth = 0
         self.type_check = type_check
 
         """A list of tuples of quote characters.  The 4-tuple is comprised
@@ -146,6 +157,7 @@ class LogicParser:
         data = data.rstrip()
 
         self._currentIndex = 0
+        self._parse_depth = 0
         self._buffer, mapping = self.process(data)
 
         try:
@@ -278,21 +290,35 @@ class LogicParser:
 
     def process_next_expression(self, context):
         """Parse the next complete expression from the stream and return it."""
+        self._parse_depth += 1
         try:
-            tok = self.token()
-        except ExpectedMoreTokensException as e:
-            raise ExpectedMoreTokensException(
-                self._currentIndex + 1, message="Expression expected."
-            ) from e
+            if self._parse_depth > self.MAX_PARSE_DEPTH:
+                # Use 1-based index (consistent with ExpectedMoreTokensException);
+                # parse() formats the caret via mapping[index - 1], so index 0
+                # (limit hit before any token is consumed) must be avoided.
+                raise LogicalExpressionException(
+                    self._currentIndex + 1,
+                    "Expression nesting exceeds the maximum depth (%d)."
+                    % self.MAX_PARSE_DEPTH,
+                )
 
-        accum = self.handle(tok, context)
+            try:
+                tok = self.token()
+            except ExpectedMoreTokensException as e:
+                raise ExpectedMoreTokensException(
+                    self._currentIndex + 1, message="Expression expected."
+                ) from e
 
-        if not accum:
-            raise UnexpectedTokenException(
-                self._currentIndex, tok, message="Expression expected."
-            )
+            accum = self.handle(tok, context)
 
-        return self.attempt_adjuncts(accum, context)
+            if not accum:
+                raise UnexpectedTokenException(
+                    self._currentIndex, tok, message="Expression expected."
+                )
+
+            return self.attempt_adjuncts(accum, context)
+        finally:
+            self._parse_depth -= 1
 
     def handle(self, tok, context):
         """This method is intended to be overridden for logics that
@@ -434,6 +460,8 @@ class LogicParser:
             return ExistsExpression
         elif tok in Tokens.ALL_LIST:
             return AllExpression
+        elif tok in Tokens.IOTA_LIST:
+            return IotaExpression
         else:
             self.assertToken(tok, Tokens.QUANTS)
 
@@ -472,10 +500,24 @@ class LogicParser:
         """Attempt to make a boolean expression.  If the next token is a boolean
         operator, then a BooleanExpression will be returned.  Otherwise, the
         parameter will be returned."""
+        # Each boolean operator deepens the AST by one, but this loop builds the
+        # whole left-nested chain without recursing through
+        # ``process_next_expression`` -- so a flat chain like ``a & a & ...``
+        # bypasses the ``_parse_depth`` guard and builds an AST deep enough that
+        # later traversal (str/simplify/variables) raises RecursionError
+        # (CWE-674). Bound the running total (current nesting + chain length).
+        chain = 0
         while self.inRange(0):
             tok = self.token(0)
             factory = self.get_BooleanExpression_factory(tok)
             if factory and self.has_priority(tok, context):
+                chain += 1
+                if self._parse_depth + chain > self.MAX_PARSE_DEPTH:
+                    raise LogicalExpressionException(
+                        self._currentIndex + 1,
+                        f"Expression nesting exceeds the maximum depth "
+                        f"({self.MAX_PARSE_DEPTH}).",
+                    )
                 self.token()  # swallow the operator
                 expression = self.make_BooleanExpression(
                     factory, expression, self.process_next_expression(tok)
@@ -626,9 +668,6 @@ class Variable:
     def __eq__(self, other):
         return isinstance(other, Variable) and self.name == other.name
 
-    def __ne__(self, other):
-        return not self == other
-
     def __lt__(self, other):
         if not isinstance(other, Variable):
             raise TypeError
@@ -713,9 +752,6 @@ class ComplexType(Type):
             and self.second == other.second
         )
 
-    def __ne__(self, other):
-        return not self == other
-
     __hash__ = Type.__hash__
 
     def matches(self, other):
@@ -755,9 +791,6 @@ class ComplexType(Type):
 class BasicType(Type):
     def __eq__(self, other):
         return isinstance(other, BasicType) and ("%s" % self) == ("%s" % other)
-
-    def __ne__(self, other):
-        return not self == other
 
     __hash__ = Type.__hash__
 
@@ -810,9 +843,6 @@ class AnyType(BasicType, ComplexType):
     def __eq__(self, other):
         return isinstance(other, AnyType) or other.__eq__(self)
 
-    def __ne__(self, other):
-        return not self == other
-
     __hash__ = Type.__hash__
 
     def matches(self, other):
@@ -834,10 +864,27 @@ EVENT_TYPE = EventType()
 ANY_TYPE = AnyType()
 
 
-def read_type(type_string):
+def read_type(type_string, _depth=0, max_depth=None):
+    """Parse a type string into a ``Type``.
+
+    Recursion is bounded by ``MAX_PARSE_DEPTH`` so that adversarially
+    nested type strings raise ``LogicalExpressionException`` instead of an
+    uncaught ``RecursionError`` (CWE-674).
+
+    :param str type_string: the type string to parse
+    :param int _depth: current recursion depth (internal)
+    :param int max_depth: maximum nesting depth; defaults to ``MAX_PARSE_DEPTH``
+    :rtype: Type
+    """
+    if max_depth is None:
+        max_depth = LogicParser.MAX_PARSE_DEPTH
+    if _depth > max_depth:
+        raise LogicalExpressionException(
+            None,
+            f"Type nesting exceeds the maximum depth ({max_depth}).",
+        )
     assert isinstance(type_string, str)
     type_string = type_string.replace(" ", "")  # remove spaces
-
     if type_string[0] == "<":
         assert type_string[-1] == ">"
         paren_count = 0
@@ -851,7 +898,8 @@ def read_type(type_string):
                 if paren_count == 1:
                     break
         return ComplexType(
-            read_type(type_string[1:i]), read_type(type_string[i + 1 : -1])
+            read_type(type_string[1:i], _depth + 1, max_depth),
+            read_type(type_string[i + 1 : -1], _depth + 1, max_depth),
         )
     elif type_string[0] == "%s" % ENTITY_TYPE:
         return ENTITY_TYPE
@@ -991,10 +1039,10 @@ class Expression(SubstituteBindingsI):
         return IffExpression(self, other)
 
     def __eq__(self, other):
-        raise NotImplementedError()
+        return NotImplemented
 
-    def __ne__(self, other):
-        return not self == other
+    def __hash__(self):
+        return hash(repr(self))
 
     def equiv(self, other, prover=None):
         """
@@ -1014,9 +1062,6 @@ class Expression(SubstituteBindingsI):
         bicond = IffExpression(self.simplify(), other.simplify())
         return prover.prove(bicond)
 
-    def __hash__(self):
-        return hash(repr(self))
-
     def substitute_bindings(self, bindings):
         expr = self
         for var in expr.variables():
@@ -1032,7 +1077,7 @@ class Expression(SubstituteBindingsI):
                 # Substitute bindings in the target value.
                 val = val.substitute_bindings(bindings)
                 # Replace var w/ the target value.
-                expr = expr.replace(var, val)
+                expr = expr.replace(var, val, alpha_convert=True)
         return expr.simplify()
 
     def typecheck(self, signature=None):
@@ -1165,7 +1210,9 @@ class Expression(SubstituteBindingsI):
         :return: set of ``Variable`` objects
         """
         return self.free() | {
-            p for p in self.predicates() | self.constants() if re.match("^[?@]", p.name)
+            p
+            for p in self.predicates() | self.constants()
+            if redos.match("^[?@]", p.name)
         }
 
     def free(self):
@@ -1204,6 +1251,40 @@ class Expression(SubstituteBindingsI):
 
     def make_VariableExpression(self, variable):
         return VariableExpression(variable)
+
+
+#: Upper bound on the number of subexpressions a single beta-reduction may
+#: produce in :meth:`ApplicationExpression.simplify`. Beta reduction copies the
+#: argument once per occurrence of the bound variable, so a tiny expression built
+#: from nested duplicating lambdas (e.g. ``(\Y.(Y & Y))`` applied repeatedly)
+#: reduces to an exponentially large normal form and exhausts CPU and memory
+#: (CWE-400). ``simplify`` refuses with a ``ValueError`` once a reduction's result
+#: exceeds this size. Realistic logical expressions have only hundreds to low
+#: thousands of subexpressions, so this default leaves roughly an order of
+#: magnitude of headroom while still bounding the blow-up; raise it for the rare
+#: genuinely large expression.
+MAX_SIMPLIFY_SIZE = 10_000
+
+
+def _exceeds_size(expression, limit):
+    """Return ``True`` if ``expression`` has more than ``limit`` subexpressions.
+
+    Counts iteratively (so deep expressions can't overflow the stack) and stops
+    as soon as the limit is passed, so the check costs ``O(limit)`` even for an
+    exponentially large expression.
+    """
+    count = 0
+    stack = [expression]
+    while stack:
+        node = stack.pop()
+        count += 1
+        if count > limit:
+            return True
+        # Leaves (AbstractVariableExpression) have no subexpressions and do not
+        # implement ``visit``; every other expression pushes its children.
+        if not isinstance(node, AbstractVariableExpression):
+            node.visit(stack.append, lambda parts: None)
+    return False
 
 
 class ApplicationExpression(Expression):
@@ -1249,7 +1330,24 @@ class ApplicationExpression(Expression):
         function = self.function.simplify()
         argument = self.argument.simplify()
         if isinstance(function, LambdaExpression):
-            return function.term.replace(function.variable, argument).simplify()
+            # Rely strictly on NLTK's native capture-avoidance during substitution
+            # without burning global variable counters proactively.
+            result = function.term.replace(
+                function.variable, argument, alpha_convert=True
+            )
+            # Beta reduction copies the argument once per occurrence of the bound
+            # variable, so nested duplicating lambdas (e.g. ``\Y.(Y & Y)``) blow
+            # up exponentially in time and memory (CWE-400). Refuse once a single
+            # reduction's result exceeds the size budget; nested reductions are
+            # each checked, so the first that overflows stops the whole search.
+            if _exceeds_size(result, MAX_SIMPLIFY_SIZE):
+                raise ValueError(
+                    f"Refusing to beta-reduce: result exceeds MAX_SIMPLIFY_SIZE "
+                    f"({MAX_SIMPLIFY_SIZE}) subexpressions; the expression may "
+                    f"cause exponential blow-up (CWE-400). Raise "
+                    f"nltk.sem.logic.MAX_SIMPLIFY_SIZE to allow it."
+                )
+            return result.simplify()
         else:
             return self.__class__(function, argument)
 
@@ -1338,9 +1436,6 @@ class ApplicationExpression(Expression):
             and self.function == other.function
             and self.argument == other.argument
         )
-
-    def __ne__(self, other):
-        return not self == other
 
     __hash__ = Expression.__hash__
 
@@ -1469,9 +1564,6 @@ class AbstractVariableExpression(Expression):
             isinstance(other, AbstractVariableExpression)
             and self.variable == other.variable
         )
-
-    def __ne__(self, other):
-        return not self == other
 
     def __lt__(self, other):
         if not isinstance(other, AbstractVariableExpression):
@@ -1678,9 +1770,6 @@ class VariableBinderExpression(Expression):
         else:
             return False
 
-    def __ne__(self, other):
-        return not self == other
-
     __hash__ = Expression.__hash__
 
 
@@ -1755,6 +1844,11 @@ class AllExpression(QuantifiedExpression):
         return Tokens.ALL
 
 
+class IotaExpression(QuantifiedExpression):
+    def getQuantifier(self):
+        return Tokens.IOTA
+
+
 class NegatedExpression(Expression):
     def __init__(self, term):
         assert isinstance(term, Expression), "%s is not an Expression" % term
@@ -1789,9 +1883,6 @@ class NegatedExpression(Expression):
 
     def __eq__(self, other):
         return isinstance(other, NegatedExpression) and self.term == other.term
-
-    def __ne__(self, other):
-        return not self == other
 
     __hash__ = Expression.__hash__
 
@@ -1832,9 +1923,6 @@ class BinaryExpression(Expression):
             and self.first == other.first
             and self.second == other.second
         )
-
-    def __ne__(self, other):
-        return not self == other
 
     __hash__ = Expression.__hash__
 
@@ -1963,7 +2051,7 @@ def is_indvar(expr):
     :return: bool True if expr is of the correct form
     """
     assert isinstance(expr, str), "%s is not a string" % expr
-    return re.match(r"^[a-df-z]\d*$", expr) is not None
+    return redos.match(r"^[a-df-z]\d*$", expr) is not None
 
 
 def is_funcvar(expr):
@@ -1975,7 +2063,7 @@ def is_funcvar(expr):
     :return: bool True if expr is of the correct form
     """
     assert isinstance(expr, str), "%s is not a string" % expr
-    return re.match(r"^[A-Z]\d*$", expr) is not None
+    return redos.match(r"^[A-Z]\d*$", expr) is not None
 
 
 def is_eventvar(expr):
@@ -1987,44 +2075,48 @@ def is_eventvar(expr):
     :return: bool True if expr is of the correct form
     """
     assert isinstance(expr, str), "%s is not a string" % expr
-    return re.match(r"^e\d*$", expr) is not None
+    return redos.match(r"^e\d*$", expr) is not None
 
 
 def demo():
     lexpr = Expression.fromstring
-    print("=" * 20 + "Test reader" + "=" * 20)
-    print(lexpr(r"john"))
-    print(lexpr(r"man(x)"))
-    print(lexpr(r"-man(x)"))
-    print(lexpr(r"(man(x) & tall(x) & walks(x))"))
-    print(lexpr(r"exists x.(man(x) & tall(x) & walks(x))"))
-    print(lexpr(r"\x.man(x)"))
-    print(lexpr(r"\x.man(x)(john)"))
-    print(lexpr(r"\x y.sees(x,y)"))
-    print(lexpr(r"\x y.sees(x,y)(a,b)"))
-    print(lexpr(r"(\x.exists y.walks(x,y))(x)"))
-    print(lexpr(r"exists x.x = y"))
-    print(lexpr(r"exists x.(x = y)"))
-    print(lexpr("P(x) & x=y & P(y)"))
-    print(lexpr(r"\P Q.exists x.(P(x) & Q(x))"))
-    print(lexpr(r"man(x) <-> tall(x)"))
+    safe_print("=" * 20 + "Test reader" + "=" * 20)
+    safe_print(lexpr(r"john"))
+    safe_print(lexpr(r"man(x)"))
+    safe_print(lexpr(r"-man(x)"))
+    safe_print(lexpr(r"(man(x) & tall(x) & walks(x))"))
+    safe_print(lexpr(r"exists x.(man(x) & tall(x) & walks(x))"))
+    safe_print(lexpr(r"\x.man(x)"))
+    safe_print(lexpr(r"\x.man(x)(john)"))
+    safe_print(lexpr(r"\x y.sees(x,y)"))
+    safe_print(lexpr(r"\x y.sees(x,y)(a,b)"))
+    safe_print(lexpr(r"(\x.exists y.walks(x,y))(x)"))
+    safe_print(lexpr(r"exists x.x = y"))
+    safe_print(lexpr(r"exists x.(x = y)"))
+    safe_print(lexpr("P(x) & x=y & P(y)"))
+    safe_print(lexpr(r"\P Q.exists x.(P(x) & Q(x))"))
+    safe_print(lexpr(r"man(x) <-> tall(x)"))
 
-    print("=" * 20 + "Test simplify" + "=" * 20)
-    print(lexpr(r"\x.\y.sees(x,y)(john)(mary)").simplify())
-    print(lexpr(r"\x.\y.sees(x,y)(john, mary)").simplify())
-    print(lexpr(r"all x.(man(x) & (\x.exists y.walks(x,y))(x))").simplify())
-    print(lexpr(r"(\P.\Q.exists x.(P(x) & Q(x)))(\x.dog(x))(\x.bark(x))").simplify())
+    safe_print("=" * 20 + "Test simplify" + "=" * 20)
+    safe_print(lexpr(r"\x.\y.sees(x,y)(john)(mary)").simplify())
+    safe_print(lexpr(r"\x.\y.sees(x,y)(john, mary)").simplify())
+    safe_print(lexpr(r"all x.(man(x) & (\x.exists y.walks(x,y))(x))").simplify())
+    safe_print(
+        lexpr(r"(\P.\Q.exists x.(P(x) & Q(x)))(\x.dog(x))(\x.bark(x))").simplify()
+    )
 
-    print("=" * 20 + "Test alpha conversion and binder expression equality" + "=" * 20)
+    safe_print(
+        "=" * 20 + "Test alpha conversion and binder expression equality" + "=" * 20
+    )
     e1 = lexpr("exists x.P(x)")
-    print(e1)
+    safe_print(e1)
     e2 = e1.alpha_convert(Variable("z"))
-    print(e2)
-    print(e1 == e2)
+    safe_print(e2)
+    safe_print(e1 == e2)
 
 
 def demo_errors():
-    print("=" * 20 + "Test reader errors" + "=" * 20)
+    safe_print("=" * 20 + "Test reader errors" + "=" * 20)
     demoException("(P(x) & Q(x)")
     demoException("((P(x) &) & Q(x))")
     demoException("P(x) -> ")
@@ -2044,11 +2136,11 @@ def demoException(s):
     try:
         Expression.fromstring(s)
     except LogicalExpressionException as e:
-        print(f"{e.__class__.__name__}: {e}")
+        safe_print(f"{e.__class__.__name__}: {e}")
 
 
 def printtype(ex):
-    print(f"{ex.str()} : {ex.type}")
+    safe_print(f"{ex.str()} : {ex.type}")
 
 
 if __name__ == "__main__":

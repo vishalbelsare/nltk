@@ -6,7 +6,7 @@ Examplos para o processamento do português
 
 (NB. Este material parte do pressuposto de que o leitor esteja
 familiarizado com o livro do NLTK, disponível em
-``http://nltk.org/index.php/Book``).
+``http://www.nltk.org/book_1ed/``).
 
 Utilizando o Corpus MacMorpho Tagged
 ------------------------------------
@@ -227,7 +227,8 @@ As versões do NLTK a partir da 0.9b1 incluem um modelo treinado para a segmenta
 em português, o qual pode ser carregado pela maneira a seguir. É mais rápido carregar um modelo
 já treinado do que repetir o treinamento do mesmo.
 
-    >>> stok = nltk.data.load('tokenizers/punkt/portuguese.pickle')
+    >>> from nltk.tokenize import PunktTokenizer
+    >>> stok = PunktTokenizer("portuguese")
 
 Stemming
 --------

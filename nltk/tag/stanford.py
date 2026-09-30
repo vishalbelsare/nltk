@@ -1,6 +1,6 @@
 # Natural Language Toolkit: Interface to the Stanford Part-of-speech and Named-Entity Taggers
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Nitin Madnani <nmadnani@ets.org>
 #         Rami Al-Rfou' <ralrfou@cs.stonybrook.edu>
 # URL: <https://www.nltk.org/>
@@ -22,7 +22,10 @@ import warnings
 from abc import abstractmethod
 from subprocess import PIPE
 
-from nltk.internals import _java_options, config_java, find_file, find_jar, java
+from nltk import pathsec
+from nltk.data import staging_tempdir
+from nltk.internals import find_file, find_jar, java
+from nltk.pathsec import validate_tool_path
 from nltk.tag.api import TaggerI
 
 _stanford_url = "https://nlp.stanford.edu/software"
@@ -74,6 +77,15 @@ class StanfordTagger(TaggerI):
         self._stanford_model = find_file(
             model_filename, env_vars=("STANFORD_MODELS",), verbose=verbose
         )
+        # Fail fast: the model is a JVM subprocess argument, so bound it here as
+        # well as at the hand-off, refuse a tamperable or oversized model, and
+        # keep only the checked string, never an out-of-sandbox path or object.
+        self._stanford_model = validate_tool_path(
+            self._stanford_model,
+            context=f"{type(self).__name__}",
+            max_bytes=pathsec.MAX_TOOL_MODEL_BYTES,
+            require_private=True,
+        )
 
         self._encoding = encoding
         self.java_options = java_options
@@ -91,34 +103,57 @@ class StanfordTagger(TaggerI):
 
     def tag_sents(self, sentences):
         encoding = self._encoding
-        default_options = " ".join(_java_options)
-        config_java(options=self.java_options, verbose=False)
 
-        # Create a temporary input file
-        _input_fh, self._input_file_path = tempfile.mkstemp(text=True)
+        input_file_path = None
+        java_succeeded = False
+        try:
+            # Create a temporary input file
+            _input_fh, input_file_path = tempfile.mkstemp(
+                text=True, dir=staging_tempdir()
+            )
+            self._input_file_path = input_file_path
 
-        cmd = list(self._cmd)
-        cmd.extend(["-encoding", encoding])
+            # The model is handed to the JVM subprocess pathsec.open cannot wrap:
+            # re-check it and freeze the checked string BEFORE _cmd reads it, so
+            # the argv never carries a swapped or re-resolving value (GHSA-8mgp).
+            self._stanford_model = validate_tool_path(
+                self._stanford_model,
+                context="StanfordTagger.tag_sents",
+                max_bytes=pathsec.MAX_TOOL_MODEL_BYTES,
+                require_private=True,
+            )
+            cmd = list(self._cmd)
+            cmd.extend(["-encoding", encoding])
 
-        # Write the actual sentences to the temporary input file
-        _input_fh = os.fdopen(_input_fh, "wb")
-        _input = "\n".join(" ".join(x) for x in sentences)
-        if isinstance(_input, str) and encoding:
-            _input = _input.encode(encoding)
-        _input_fh.write(_input)
-        _input_fh.close()
+            # Write the actual sentences to the temporary input file
+            with os.fdopen(_input_fh, "wb") as input_fh:
+                _input = "\n".join(" ".join(x) for x in sentences)
+                if isinstance(_input, str) and encoding:
+                    _input = _input.encode(encoding)
+                input_fh.write(_input)
 
-        # Run the tagger and get the output
-        stanpos_output, _stderr = java(
-            cmd, classpath=self._stanford_jar, stdout=PIPE, stderr=PIPE
-        )
-        stanpos_output = stanpos_output.decode(encoding)
-
-        # Delete the temporary file
-        os.unlink(self._input_file_path)
-
-        # Return java configurations to their default values
-        config_java(options=default_options, verbose=False)
+            # Run the tagger and get the output
+            stanpos_output, _stderr = java(
+                cmd,
+                classpath=self._stanford_jar,
+                stdout=PIPE,
+                stderr=PIPE,
+                options=self.java_options,
+            )
+            # java() returns text (universal_newlines=True), so only decode when
+            # an older/bytes-returning path is in play.
+            if isinstance(stanpos_output, bytes):
+                stanpos_output = stanpos_output.decode(encoding)
+            java_succeeded = True
+        finally:
+            if input_file_path:
+                try:
+                    os.unlink(input_file_path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    if java_succeeded:
+                        raise
 
         return self.parse_output(stanpos_output, sentences)
 
@@ -147,8 +182,8 @@ class StanfordPOSTagger(StanfordTagger):
     Example:
 
         >>> from nltk.tag import StanfordPOSTagger
-        >>> st = StanfordPOSTagger('english-bidirectional-distsim.tagger')
-        >>> st.tag('What is the airspeed of an unladen swallow ?'.split())
+        >>> st = StanfordPOSTagger('english-bidirectional-distsim.tagger') # doctest: +SKIP
+        >>> st.tag('What is the airspeed of an unladen swallow ?'.split()) # doctest: +SKIP
         [('What', 'WP'), ('is', 'VBZ'), ('the', 'DT'), ('airspeed', 'NN'), ('of', 'IN'), ('an', 'DT'), ('unladen', 'JJ'), ('swallow', 'VB'), ('?', '.')]
     """
 

@@ -1,14 +1,16 @@
 # Natural Language Toolkit: Plaintext Corpus Reader
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Edward Loper <edloper@gmail.com>
 # URL: <https://www.nltk.org/>
 # For license information, see LICENSE.TXT
 
 """Corpus reader for the XML version of the British National Corpus."""
 
+from defusedxml.ElementTree import parse as safe_parse
+
 from nltk.corpus.reader.util import concat
-from nltk.corpus.reader.xmldocs import ElementTree, XMLCorpusReader, XMLCorpusView
+from nltk.corpus.reader.xmldocs import XMLCorpusReader, XMLCorpusView
 
 
 class BNCCorpusReader(XMLCorpusReader):
@@ -113,7 +115,8 @@ class BNCCorpusReader(XMLCorpusReader):
         """
         result = []
 
-        xmldoc = ElementTree.parse(fileid).getroot()
+        with fileid.open() as fp:
+            xmldoc = safe_parse(fp).getroot()
         for xmlsent in xmldoc.findall(".//s"):
             sent = []
             for xmlword in _all_xmlwords_in(xmlsent):
@@ -138,14 +141,26 @@ class BNCCorpusReader(XMLCorpusReader):
         return result
 
 
-def _all_xmlwords_in(elt, result=None):
+#: Bound recursion over nested XML so an adversarially deep corpus file raises
+#: ValueError instead of an uncaught RecursionError (CWE-674).
+MAX_XML_DEPTH = 500
+
+
+def _all_xmlwords_in(elt, result=None, _depth=0, max_depth=None):
+    if max_depth is None:
+        max_depth = MAX_XML_DEPTH
+    if _depth > max_depth:
+        raise ValueError(
+            f"XML nesting depth exceeds MAX_XML_DEPTH ({max_depth}); "
+            "the input may be adversarially deep."
+        )
     if result is None:
         result = []
     for child in elt:
         if child.tag in ("c", "w"):
             result.append(child)
         else:
-            _all_xmlwords_in(child, result)
+            _all_xmlwords_in(child, result, _depth + 1, max_depth)
     return result
 
 

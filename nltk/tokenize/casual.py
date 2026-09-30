@@ -1,7 +1,7 @@
 #
 # Natural Language Toolkit: Twitter Tokenizer
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Christopher Potts <cgpotts@stanford.edu>
 #         Ewan Klein <ewan@inf.ed.ac.uk> (modifications)
 #         Pierpaolo Pantone <> (modifications)
@@ -48,6 +48,7 @@ from typing import List
 
 import regex  # https://github.com/nltk/nltk/issues/2409
 
+from nltk import redos
 from nltk.tokenize.api import TokenizerI
 
 ######################################################################
@@ -95,21 +96,21 @@ URLS = r"""			# Capture 1: entire matched URL
     )
     |					#   or
                                        # looks like domain name followed by a slash:
-    [a-z0-9.\-]+[.]
+    [a-z0-9.\-]{1,255}[.]              # bounded to avoid catastrophic backtracking (ReDoS)
     (?:[a-z]{2,13})
     /
   )
   (?:					# One or more:
     [^\s()<>{}\[\]]+			# Run of non-space, non-()<>{}[]
     |					#   or
-    \([^\s()]*?\([^\s()]+\)[^\s()]*?\) # balanced parens, one level deep: (...(...)...)
+    \([^\s()]{0,255}?\([^\s()]{1,255}\)[^\s()]{0,255}?\) # balanced parens, one level deep: (...(...)...)
     |
-    \([^\s]+?\)				# balanced parens, non-recursive: (...)
+    \([^\s]{1,255}?\)				# balanced parens, non-recursive: (...)
   )+
   (?:					# End with:
-    \([^\s()]*?\([^\s()]+\)[^\s()]*?\) # balanced parens, one level deep: (...(...)...)
+    \([^\s()]{0,255}?\([^\s()]{1,255}\)[^\s()]{0,255}?\) # balanced parens, one level deep: (...(...)...)
     |
-    \([^\s]+?\)				# balanced parens, non-recursive: (...)
+    \([^\s]{1,255}?\)				# balanced parens, non-recursive: (...)
     |					#   or
     [^\s`!()\[\]{};:'".,<>?«»“”‘’]	# not a space or one of these punct chars
   )
@@ -117,13 +118,36 @@ URLS = r"""			# Capture 1: entire matched URL
   (?:
   	(?<!@)			        # not preceded by a @, avoid matching foo@_gmail.com_
     [a-z0-9]+
-    (?:[.\-][a-z0-9]+)*
+    (?:[.\-][a-z0-9]+){0,126}  # bounded to avoid catastrophic backtracking (ReDoS); DNS allows at most 127 labels
     [.]
     (?:[a-z]{2,13})
     \b
     /?
     (?!@)			        # not succeeded by a @,
                             # avoid matching "foo.na" in "foo.na@example.com"
+  )
+"""
+
+# emoji flag sequence
+# https://en.wikipedia.org/wiki/Regional_indicator_symbol
+# For regex simplicity, include all possible enclosed letter pairs,
+# not the ISO subset of two-letter regional indicator symbols.
+# See https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2#Current_codes
+# Future regional flag support may be handled with the regex for
+# U+1F3F4 🏴 followed by emoji tag sequences:
+# r'\U0001F3F4[\U000E0000-\U000E007E]{5}\U000E007F'
+FLAGS = r"""
+  (?:
+    [\U0001F1E6-\U0001F1FF]{2}  # all enclosed letter pairs
+    |
+    # English flag
+    \U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006e\U000E0067\U000E007F
+    |
+    # Scottish flag
+    \U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F
+    |
+    # For Wales? Why Richard, it profit a man nothing to give his soul for the whole world … but for Wales!
+    \U0001F3F4\U000E0067\U000E0062\U000E0077\U000E006C\U000E0073\U000E007F
   )
 """
 
@@ -158,13 +182,15 @@ REGEXPS = (
     # Twitter hashtags:
     r"""(?:\#+[\w_]+[\w\'_\-]*[\w_]+)""",
     # email addresses
-    r"""[\w.+-]+@[\w-]+\.(?:[\w-]\.?)+[\w-]""",
+    r"""[\w.+-]{1,64}@[\w-]{1,63}\.(?:[\w-]\.?){1,251}[\w-]""",
     # Zero-Width-Joiner and Skin tone modifier emojis
     """.(?:
-        [\U0001F3FB-\U0001F3FF]?(?:\u200d.[\U0001F3FB-\U0001F3FF]?)+
+        [\U0001f3fb-\U0001f3ff]?(?:\u200d.[\U0001f3fb-\U0001f3ff]?)+
         |
-        [\U0001F3FB-\U0001F3FF]
+        [\U0001f3fb-\U0001f3ff]
     )""",
+    # flags
+    FLAGS,
     # Remaining word types:
     r"""
     (?:[^\W\d_](?:[^\W\d_]|['\-_])+[^\W\d_]) # Words with apostrophes or dashes.
@@ -173,7 +199,7 @@ REGEXPS = (
     |
     (?:[\w_]+)                     # Words without apostrophes or dashes.
     |
-    (?:\.(?:\s*\.){1,})            # Ellipsis dots.
+    (?:\.(?:[^\S\r\n]*\.){1,})            # Ellipsis dots.
     |
     (?:\S)                         # Everything else that isn't whitespace.
     """,
@@ -187,17 +213,17 @@ REGEXPS_PHONE = (REGEXPS[0], PHONE_REGEX, *REGEXPS[1:])
 # the core tokenizing regexes. They are compiled lazily.
 
 # WORD_RE performs poorly on these patterns:
-HANG_RE = regex.compile(r"([^a-zA-Z0-9])\1{3,}")
+HANG_RE = redos.compile(r"([^\p{L}\p{N}])\1{3,}")
 
 # The emoticon string gets its own regex so that we can preserve case for
 # them as needed:
-EMOTICON_RE = regex.compile(EMOTICONS, regex.VERBOSE | regex.I | regex.UNICODE)
+EMOTICON_RE = redos.compile(EMOTICONS, regex.VERBOSE | regex.I | regex.UNICODE)
 
 # These are for regularizing HTML entities to Unicode:
-ENT_RE = regex.compile(r"&(#?(x?))([^&;\s]+);")
+ENT_RE = redos.compile(r"&(#?(x?))([^&;\s]+);")
 
 # For stripping away handles from a tweet:
-HANDLES_RE = regex.compile(
+HANDLES_RE = redos.compile(
     r"(?<![A-Za-z0-9_!@#\$%&*])@"
     r"(([A-Za-z0-9_]){15}(?!@)|([A-Za-z0-9_]){1,14}(?![A-Za-z0-9_]*@))"
 )
@@ -285,9 +311,9 @@ class TweetTokenizer(TokenizerI):
         >>> from nltk.tokenize import TweetTokenizer
         >>> tknzr = TweetTokenizer()
         >>> s0 = "This is a cooool #dummysmiley: :-) :-P <3 and some arrows < > -> <--"
-        >>> tknzr.tokenize(s0)
-        ['This', 'is', 'a', 'cooool', '#dummysmiley', ':', ':-)', ':-P', '<3'
-        , 'and', 'some', 'arrows', '<', '>', '->', '<--']
+        >>> tknzr.tokenize(s0) # doctest: +NORMALIZE_WHITESPACE
+        ['This', 'is', 'a', 'cooool', '#dummysmiley', ':', ':-)', ':-P', '<3', 'and', 'some', 'arrows', '<', '>', '->',
+         '<--']
 
     Examples using `strip_handles` and `reduce_len parameters`:
 
@@ -332,7 +358,7 @@ class TweetTokenizer(TokenizerI):
         self.strip_handles = strip_handles
         self.match_phone_numbers = match_phone_numbers
 
-    def tokenize(self, text: str) -> List[str]:
+    def tokenize(self, text: str) -> list[str]:
         """Tokenize the input text.
 
         :param text: str
@@ -350,11 +376,22 @@ class TweetTokenizer(TokenizerI):
             text = reduce_lengthening(text)
         # Shorten problematic sequences of characters
         safe_text = HANG_RE.sub(r"\1\1\1", text)
-        # Recognise phone numbers during tokenization
-        if self.match_phone_numbers:
-            words = self.PHONE_WORD_RE.findall(safe_text)
-        else:
-            words = self.WORD_RE.findall(safe_text)
+        # Recognise phone numbers during tokenization. Bound the match with a
+        # wall-clock timeout: the phone sub-pattern backtracks super-linearly on
+        # a long run of digits (a ~40 KB digit "tweet" was O(n^2), CWE-407/1333),
+        # and the URL guard above does not cover this numeric path.
+        try:
+            if self.match_phone_numbers:
+                words = self.PHONE_WORD_RE.findall(
+                    safe_text, timeout=redos.DEFAULT_TIMEOUT
+                )
+            else:
+                words = self.WORD_RE.findall(safe_text, timeout=redos.DEFAULT_TIMEOUT)
+        except TimeoutError:
+            raise TimeoutError(
+                f"TweetTokenizer exceeded its {redos.DEFAULT_TIMEOUT}s time limit; "
+                "the input may be adversarial (e.g. a long run of digits)."
+            ) from None
         # Possibly alter the case, but avoid changing emoticons like :D into :d:
         if not self.preserve_case:
             words = list(
@@ -367,7 +404,7 @@ class TweetTokenizer(TokenizerI):
         """Core TweetTokenizer regex"""
         # Compiles the regex for this and all future instantiations of TweetTokenizer.
         if not type(self)._WORD_RE:
-            type(self)._WORD_RE = regex.compile(
+            type(self)._WORD_RE = redos.compile(
                 f"({'|'.join(REGEXPS)})",
                 regex.VERBOSE | regex.I | regex.UNICODE,
             )
@@ -378,7 +415,7 @@ class TweetTokenizer(TokenizerI):
         """Secondary core TweetTokenizer regex"""
         # Compiles the regex for this and all future instantiations of TweetTokenizer.
         if not type(self)._PHONE_WORD_RE:
-            type(self)._PHONE_WORD_RE = regex.compile(
+            type(self)._PHONE_WORD_RE = redos.compile(
                 f"({'|'.join(REGEXPS_PHONE)})",
                 regex.VERBOSE | regex.I | regex.UNICODE,
             )
@@ -395,7 +432,7 @@ def reduce_lengthening(text):
     Replace repeated character sequences of length 3 or greater with sequences
     of length 3.
     """
-    pattern = regex.compile(r"(.)\1{2,}")
+    pattern = redos.compile(r"(.)\1{2,}")
     return pattern.sub(r"\1\1\1", text)
 
 

@@ -121,8 +121,8 @@ class IBMModel3(IBMModel):
     >>> print(round(ibm3.fertility_table[1]['book'], 3))
     1.0
 
-    >>> print(ibm3.p1)
-    0.054...
+    >>> print(round(ibm3.p1, 3))
+    0.054
 
     >>> test_sentence = bitext[2]
     >>> test_sentence.words
@@ -204,7 +204,7 @@ class IBMModel3(IBMModel):
                         "A target sentence is too long ("
                         + str(m)
                         + " words). Results may be less accurate."
-                    )
+                    )  # unsafe-print ok: literal text with a numeric vocabulary or length bound
                 for j in range(1, m + 1):
                     for i in range(0, l + 1):
                         self.distortion_table[j][i][l][m] = initial_prob
@@ -334,10 +334,10 @@ class Model3Counts(Counts):
     def __init__(self):
         super().__init__()
         self.distortion = defaultdict(
-            lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: 0.0)))
+            lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
         )
         self.distortion_for_any_j = defaultdict(
-            lambda: defaultdict(lambda: defaultdict(lambda: 0.0))
+            lambda: defaultdict(lambda: defaultdict(float))
         )
 
     def update_distortion(self, count, alignment_info, j, l, m):

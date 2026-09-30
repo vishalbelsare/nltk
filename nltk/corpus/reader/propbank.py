@@ -1,14 +1,15 @@
 # Natural Language Toolkit: PropBank Corpus Reader
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Edward Loper <edloper@gmail.com>
 # URL: <https://www.nltk.org/>
 # For license information, see LICENSE.TXT
 
-import re
 from functools import total_ordering
-from xml.etree import ElementTree
 
+from defusedxml.ElementTree import parse as safe_parse
+
+from nltk import redos
 from nltk.corpus.reader.api import *
 from nltk.corpus.reader.util import *
 from nltk.internals import raise_unorderable_types
@@ -104,7 +105,7 @@ class PropbankCorpusReader(CorpusReader):
         # n.b.: The encoding for XML fileids is specified by the file
         # itself; so we ignore self._encoding here.
         with self.abspath(framefile).open() as fp:
-            etree = ElementTree.parse(fp).getroot()
+            etree = safe_parse(fp).getroot()
         for roleset in etree.findall("predicate/roleset"):
             if roleset.attrib["id"] == roleset_id:
                 return roleset
@@ -127,7 +128,7 @@ class PropbankCorpusReader(CorpusReader):
             # n.b.: The encoding for XML fileids is specified by the file
             # itself; so we ignore self._encoding here.
             with self.abspath(framefile).open() as fp:
-                etree = ElementTree.parse(fp).getroot()
+                etree = safe_parse(fp).getroot()
             rsets.append(etree.findall("predicate/roleset"))
         return LazyConcatenation(rsets)
 
@@ -176,7 +177,6 @@ class PropbankInstance:
         arguments,
         parse_corpus=None,
     ):
-
         self.fileid = fileid
         """The name of the file containing the parse tree for this
         instance's sentence."""
@@ -250,7 +250,7 @@ class PropbankInstance:
             self.inflection,
         )
         items = self.arguments + ((self.predicate, "rel"),)
-        for (argloc, argid) in sorted(items):
+        for argloc, argid in sorted(items):
             s += f" {argloc}-{argid}"
         return s
 
@@ -285,21 +285,25 @@ class PropbankInstance:
         if parse_fileid_xform is not None:
             fileid = parse_fileid_xform(fileid)
 
-        # Convert sentence & word numbers to ints.
-        sentnum = int(sentnum)
-        wordnum = int(wordnum)
-
-        # Parse the inflection
-        inflection = PropbankInflection.parse(inflection)
-
-        # Parse the predicate location.
-        predicate = PropbankTreePointer.parse(rel[0][:-4])
-
-        # Parse the arguments.
-        arguments = []
-        for arg in args:
-            argloc, argid = arg.split("-", 1)
-            arguments.append((PropbankTreePointer.parse(argloc), argid))
+        # Convert the numeric fields and parse the inflection, the predicate
+        # location, and the argument pointers. Any malformed field would
+        # otherwise leak a cryptic ValueError (e.g. "invalid literal for int()",
+        # "Bad propbank inflection string", "bad propbank pointer", or an
+        # unpacking error from an argument missing its "-" separator) that aborts
+        # iteration over the whole corpus; fail with the same clear message as
+        # the checks above, so callers can catch a single error for any
+        # malformed line.
+        try:
+            sentnum = int(sentnum)
+            wordnum = int(wordnum)
+            inflection = PropbankInflection.parse(inflection)
+            predicate = PropbankTreePointer.parse(rel[0][:-4])
+            arguments = []
+            for arg in args:
+                argloc, argid = arg.split("-", 1)
+                arguments.append((PropbankTreePointer.parse(argloc), argid))
+        except ValueError:
+            raise ValueError("Badly formatted propbank line: %r" % s) from None
 
         # Put it all together.
         return PropbankInstance(
@@ -509,7 +513,7 @@ class PropbankInflection:
     def __repr__(self):
         return "<PropbankInflection: %s>" % self
 
-    _VALIDATE = re.compile(r"[igpv\-][fpn\-][pob\-][3\-][ap\-]$")
+    _VALIDATE = redos.compile(r"[igpv\-][fpn\-][pob\-][3\-][ap\-]$")
 
     @staticmethod
     def parse(s):

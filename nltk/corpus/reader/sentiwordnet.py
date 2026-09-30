@@ -1,6 +1,6 @@
 # Natural Language Toolkit: SentiWordNet
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Christopher Potts <cgpotts@stanford.edu>
 # URL: <https://www.nltk.org/>
 # For license information, see LICENSE.TXT
@@ -19,12 +19,12 @@ http://sentiwordnet.isti.cnr.it/
     >>> print(swn.senti_synset('breakdown.n.03'))
     <breakdown.n.03: PosScore=0.0 NegScore=0.25>
     >>> list(swn.senti_synsets('slow'))
-    [SentiSynset('decelerate.v.01'), SentiSynset('slow.v.02'),
-    SentiSynset('slow.v.03'), SentiSynset('slow.a.01'),
-    SentiSynset('slow.a.02'), SentiSynset('dense.s.04'),
-    SentiSynset('slow.a.04'), SentiSynset('boring.s.01'),
-    SentiSynset('dull.s.08'), SentiSynset('slowly.r.01'),
-    SentiSynset('behind.r.03')]
+    [SentiSynset('decelerate.v.01'), SentiSynset('slow.v.02'),\
+ SentiSynset('slow.v.03'), SentiSynset('slow.a.01'),\
+ SentiSynset('slow.a.02'), SentiSynset('dense.s.04'),\
+ SentiSynset('slow.a.04'), SentiSynset('boring.s.01'),\
+ SentiSynset('dull.s.05'), SentiSynset('slowly.r.01'),\
+ SentiSynset('behind.r.03')]
     >>> happy = swn.senti_synsets('happy', 'a')
     >>> happy0 = list(happy)[0]
     >>> happy0.pos_score()
@@ -35,8 +35,8 @@ http://sentiwordnet.isti.cnr.it/
     0.125
 """
 
-import re
 
+from nltk import redos
 from nltk.corpus.reader import CorpusReader
 
 
@@ -54,9 +54,9 @@ class SentiWordNetCorpusReader(CorpusReader):
 
     def _parse_src_file(self):
         lines = self.open(self._fileids[0]).read().splitlines()
-        lines = filter((lambda x: not re.search(r"^\s*#", x)), lines)
+        lines = filter((lambda x: not redos.search(r"^\s*#", x)), lines)
         for i, line in enumerate(lines):
-            fields = [field.strip() for field in re.split(r"\t+", line)]
+            fields = [field.strip() for field in redos.split(r"\t+", line)]
             try:
                 pos, offset, pos_score, neg_score, synset_terms, gloss = fields
             except BaseException as e:

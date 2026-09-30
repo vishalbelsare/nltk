@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Masato Hagiwara <hagisan@gmail.com>
 # URL: <https://www.nltk.org/>
 # For license information, see LICENSE.TXT
@@ -9,6 +9,7 @@ import sys
 from nltk.corpus.reader import util
 from nltk.corpus.reader.api import *
 from nltk.corpus.reader.util import *
+from nltk.termsec import safe_print
 
 
 class ChasenCorpusReader(CorpusReader):
@@ -90,12 +91,10 @@ class ChasenCorpusView(StreamBackedCorpusView):
         """Reads one paragraph at a time."""
         block = []
         for para_str in read_regexp_block(stream, r".", r"^EOS\n"):
-
             para = []
 
             sent = []
             for line in para_str.splitlines():
-
                 _eos = line.strip() == "EOS"
                 _cells = line.split("\t")
                 w = (_cells[0], "\t".join(_cells[1:]))
@@ -129,14 +128,13 @@ class ChasenCorpusView(StreamBackedCorpusView):
 
 
 def demo():
-
     import nltk
     from nltk.corpus.util import LazyCorpusLoader
 
     jeita = LazyCorpusLoader("jeita", ChasenCorpusReader, r".*chasen", encoding="utf-8")
-    print("/".join(jeita.words()[22100:22140]))
+    safe_print("/".join(jeita.words()[22100:22140]))
 
-    print(
+    safe_print(
         "\nEOS\n".join(
             "\n".join("{}/{}".format(w[0], w[1].split("\t")[2]) for w in sent)
             for sent in jeita.tagged_sents()[2170:2173]
@@ -145,7 +143,6 @@ def demo():
 
 
 def test():
-
     from nltk.corpus.util import LazyCorpusLoader
 
     jeita = LazyCorpusLoader("jeita", ChasenCorpusReader, r".*chasen", encoding="utf-8")

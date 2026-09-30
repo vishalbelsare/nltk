@@ -1,6 +1,6 @@
 # Natural Language Toolkit: source Makefile
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Steven Bird <stevenbird1@gmail.com>
 #	 Edward Loper <edloper@gmail.com>
 # URL: <https://www.nltk.org/>
@@ -36,25 +36,19 @@ demotest:
 # DISTRIBUTIONS
 ########################################################################
 
-dist: zipdist
-
-# twine only permits one source distribution
-#gztardist: clean_code
-#	$(PYTHON) setup.py -q sdist --format=gztar
-zipdist: clean_code
-	$(PYTHON) setup.py -q sdist --format=zip bdist_wheel
-windist: clean_code
-	$(PYTHON) setup.py -q bdist --format=wininst --plat-name=win32
+dist: clean_code
+	$(PYTHON) -m build
 
 ########################################################################
 # CLEAN
 ########################################################################
 
 clean: clean_code
-	rm -rf build iso dist api MANIFEST nltk-$(VERSION) nltk.egg-info
+	rm -rf build web/_build iso dist api MANIFEST nltk-$(VERSION) nltk.egg-info
 
 clean_code:
 	rm -f `find nltk -name '*.pyc'`
 	rm -f `find nltk -name '*.pyo'`
 	rm -f `find . -name '*~'`
+	rm -rf `find . -name '__pycache__'`
 	rm -f MANIFEST # regenerate manifest from MANIFEST.in

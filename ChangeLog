@@ -1,3 +1,246 @@
+Version 3.10.3 2026-08-12
+
+* docs: wrap Chat-80 HOWTO output
+* Sandbox Stanford JAR execution to nltk_data directories
+* Harden path-traversal / file-I/O sandbox: close write-side symlink TOCTOU + shared-temp squat, lock the cluster with a living audit (CWE-22/59/377)
+* Extend algorithmic-complexity DoS hardening: repo-wide sweep + two-string distances (CWE-407/CWE-400)
+* Bound unbounded-work DoS in parsers and grammar transforms (CWE-407/674/835)
+* fix(security): sandbox MaltParser's Java execution (CVE-2026-12252, CVE-2026-12841)
+* fix(security): trust the system temp dir only when it is private (CWE-377/CWE-378)
+* fix(security): validate corpus-reader roots against the data sandbox (CWE-73)
+* fix(security): validate per-call java() options and replace the -XX:/-D allowlist with a minimal one (CWE-88)
+* Additional security hardening (CWE-407, CWE-426, CWE-427, CWE-502, CWE-59, CWE-776, CWE-918)
+
+Thanks to the following contributors to 3.10.3: Mohammad Favas S, leduckhuong, Ziyu Lin, dougtrainer28-cmyk, Chaitanya Kadian, 0xRenSec, Arpit Jain, Jace, nguyencanhthuong, Liling Tan, medimedi, Eric Kafe.
+
+Version 3.10.2 2026-08-05
+
+* Remove inisec.py and document PYTHONSAFEPATH instead
+* Skip draft step in release workflow
+* Fix symlink escape in FramenetCorpusReader (CWE-59)
+* Guard tempfile.gettempdir() when building pathsec allowed roots
+* add tests for transitive_closure
+
+Thanks to the following contributors to 3.10.2:
+Litesh Ghute, Eric Kafe, Evan Kiefer, tarann26 and Rav Singh Chandan
+
+Version 3.10.1 2026-07-29
+
+* Expand `~` in env-var paths
+* Validate types after WordNet app pickle deserialization
+* Fix uncontrolled search path in HunposTagger
+* Use exact thirds in `masi_distance`
+* Avoid retaining bllip import exceptions
+* Fix `word_tokenize`: pad opening single quote before multi-letter words.
+* Implement `Tree.pformat_latex_forest`.
+* Prevent module hijacking in inline imports.
+* Fix ReDoS in TweetTokenizer URL and email regexes.
+
+Thanks to the following contributors to 3.10.1:
+Abhinav, Litesh Ghute, Eric Kafe, Eryk Kaźmierczak, Selim C.,
+Muhtasim Munif Fahim, Triniti K., and Tom Y. Mitich.
+
+Version 3.10.0 2026-06-11
+
+* Enforce the stricter `nltk.pathsec` security policy by default
+* Document the new security model and migration guidance
+* Harden resource loading against path traversal and SSRF/DNS-rebinding
+* Harden downloader path handling and block XML entity expansion
+* Close remaining corpus-reader security edge cases
+* Replace unsafe `exec()` usage in the utility CLI
+* Warn on unpickling user-provided pickles
+* Add HuggingFace datasets integration (`nltk.huggingface`)
+* Align TnT with Brants (2000) specifications
+* Fix PorterStemmer irregular-form lowercasing in NLTK mode
+* Fix TransitionParser sparse index dtype for scikit-learn 1.9
+* Fix TextCat tie handling
+* Fix WordNet object comparisons for incompatible types
+* Cache WordNet max depth lazily for `lch_similarity()`
+* Fix CCG variable direction, substitution, and type-raising bugs
+* Fix Jaro similarity for single-character and empty-string cases
+* Improve CI and release-maintenance workflows
+
+Thanks to the following contributors to 3.10.0:
+13rac1, alvations, bowiechen, devesh-2002, ekaf, elias-ba,
+haosenwang1018, HyperPS, ihitamandal, jancallewaert, jhnwnstd,
+JuanIMartinezB, Lemm1, LinZiyuu, Mr-Neutr0n, PastelStorm,
+scruge1, Syzygy2048, ylwango613, yzhaoinuw
+
+Version 3.9.4 2026-03-24
+
+* Support Python 3.14
+* Fix bug in Levenshtein distance when substitution_cost > 2
+* Fix bug in Treebank detokeniser re quote ordering
+* Fix bug in Jaro similarity for empty strings
+* Several security enhancements
+* Fix GHSA-rf74-v2fm-23pw: unbounded recursion in JSONTaggedDecoder
+* Implement TextTiling vocabulary introduction method (Hearst 1997)
+* Fix ALINE feature matrix errors and add comprehensive tests
+* Support multiple VerbNet versions, fix longid/shortid regex for VerbNet ids
+* Let downloader fallback to md5 when sha256 is unavailable
+* Several other minor bugfixes and code cleanups
+
+Thanks to the following contributors to 3.9.4:
+Min-Yen Kan, Eric Kafe, Emily Voss, bowiechen, Hrudhai01,
+jancallewaert, Mr-Neutr0n, pollak.peter89, ylwango613,
+
+Version 3.9.3 2026-02-21
+
+* Fix CVE-2025-14009: secure ZIP extraction in nltk.downloader (#3468)
+* Block path traversal/arbitrary reads in nltk.data for protocol-less refs (#3467)
+* Block path traversal/abs paths in corpus readers and FS pointers (#3479, #3480)
+* Validate external StanfordSegmenter JARs using SHA256 (#3477)
+* Add optional sandbox enforcement for filestring() (#3485)
+* Maintenance: downloader/zipped models, CI/tooling updates
+
+Thanks to the following contributors to 3.9.3:
+Chris Clauss, Eric Kafe, HyperPS, purificant, Shivansh-Game, Christopher Smith
+
+Version 3.9.2 2025-10-01
+
+* Update download checksums to use SHA256 in built index
+* Fix percentage escape in new-style string formatting
+* replace shortened URLs using goo.gl
+* Make Wordnet interoperable with various taggers and tagged corpora
+* Fix saving PerceptronTagger
+* Document how to reproduce old Wordnet studies
+* properly initialize Portuguese corpus reader
+* support for mixed rules conversion into Chomsky Normal Form
+* only import tkinter if a GUI is needed
+* issue #2112 with Corenlp
+* new environment variable NLTK_DOWNLOADER_FORCE_INTERACTIVE_SHELL
+* Lesk defaults to most frequent sense in case of ties
+
+Thanks to the following contributors to 3.9.2:
+Jose Cols, Peter de Blanc, GeneralPoxter, Eric Kafe, William LaCroix, Jason Liu,
+Samer Masterson, Mike014, purificant, Andrew Ernest Ritz, samertm, Ikram Ul Haq,
+Christopher Smith, Ryan Mannion
+
+Version 3.9.1 2024-08-19
+* Fixed bug that prevented wordnet from loading
+
+Version 3.9 2024-08-18
+* Fix security vulnerability CVE-2024-39705 (breaking change)
+* Replace pickled models (punkt, chunker, taggers) by new pickle-free "_tab" packages
+* No longer sort Wordnet synsets and relations (sort in calling function when required)
+* Only strip the last suffix in Wordnet Morphy, thus restricting synsets() results
+* Add Python 3.12 support
+* Many other minor fixes
+
+Thanks to the following contributors to 3.8.2:
+Tom Aarsen, Cat Lee Ball, Veralara Bernhard, Carlos Brandt, Konstantin Chernyshev, Michael Higgins,
+Eric Kafe, Vivek Kalyan, David Lukes, Rob Malouf, purificant, Alex Rudnick, Liling Tan, Akihiro Yamazaki.
+
+Version 3.8.1 2023-01-02
+
+* Resolve RCE vulnerability in localhost WordNet Browser (#3100)
+* Remove unused tool scripts (#3099)
+* Resolve XSS vulnerability in localhost WordNet Browser (#3096)
+* Add Python 3.11 support (#3090)
+
+Thanks to the following contributors to 3.8.1:
+Francis Bond, John Vandenberg, Tom Aarsen
+
+Version 3.8 2022-12-12
+
+* Refactor dispersion plot (#3082)
+* Provide type hints for LazyCorpusLoader variables (#3081)
+* Throw warning when LanguageModel is initialized with incorrect vocabulary (#3080)
+* Fix WordNet's all_synsets() function (#3078)
+* Resolve TreebankWordDetokenizer inconsistency with end-of-string contractions (#3070)
+* Support both iso639-3 codes and BCP-47 language tags (#3060)
+* Avoid DeprecationWarning in Regexp tokenizer (#3055)
+* Fix many doctests, add doctests to CI (#3054, #3050, #3048)
+* Fix bool field not being read in VerbNet (#3044)
+* Greatly improve time efficiency of SyllableTokenizer when tokenizing numbers (#3042)
+* Fix encodings of Polish udhr corpus reader (#3038)
+* Allow TweetTokenizer to tokenize emoji flag sequences (#3034)
+* Prevent LazyModule from increasing the size of nltk.__dict__ (#3033)
+* Fix CoreNLPServer non-default port issue (#3031)
+* Add "acion" suffix to the Spanish SnowballStemmer (#3030)
+* Allow loading WordNet without OMW (#3026)
+* Use input() in nltk.chat.chatbot() for Jupyter support (#3022)
+* Fix edit_distance_align() in distance.py (#3017)
+* Tackle performance and accuracy regression of sentence tokenizer since NLTK 3.6.6 (#3014)
+* Add the Iota operator to semantic logic (#3010)
+* Resolve critical errors in WordNet app (#3008)
+* Resolve critical error in CHILDES Corpus (#2998)
+* Make WordNet information_content() accept adjective satellites (#2995)
+* Add "strict=True" parameter to CoreNLP (#2993, #3043)
+* Resolve issue with WordNet's synset_from_sense_key (#2988)
+* Handle WordNet synsets that were lost in mapping (#2985)
+* Resolve TypeError in Boxer (#2979)
+* Add function to retrieve WordNet synonyms (#2978)
+* Warn about nonexistent OMW offsets instead of raising an error (#2974)
+* Fix missing ic argument in res, jcn and lin similarity functions of WordNet (#2970)
+* Add support for the extended OMW (#2946)
+* Fix LC cutoff policy of text tiling (#2936)
+* Optimize ConditionalFreqDist.__add__ performance (#2939)
+* Add Markdown corpus reader (#2902)
+
+Thanks to the following contributors to 3.8:
+Alexandre Perez-Lebel, David Lukes, Eric Kafe, Fernando Carranza, Heungson Lee,
+Hoyeol Kim, James Huang, Jelle Zijlstra, Louis-Justin Tallot, M.K. Pawelkiewicz,
+Jan Lennartz, Malinda Dilhara, Martin Kondratzky, Rob Malouf, Saud Kadiri,
+Siddhesh Mhadnak, Stephan Hasler, Steve Smith, Tom Aarsen, Tyler Sheaffer,
+Yue Zhao, cestwc, elespike, purificant, richardyy1188
+
+Version 3.7 2022-02-09
+
+* Improve and update the NLTK team page on nltk.org (#2855, #2941)
+* Drop support for Python 3.6, support Python 3.10 (#2920)
+
+Thanks to the following contributors to 3.7:
+Tom Aarsen
+
+Version 3.6.7 2021-12-28
+
+* Resolve IndexError in `sent_tokenize` and `word_tokenize` (#2922)
+
+Thanks to the following contributors to 3.6.7:
+Tom Aarsen
+
+Version 3.6.6 2021-12-21
+
+* Refactor `gensim.doctest` to work for gensim 4.0.0 and up (#2914)
+* Add Precision, Recall, F-measure, Confusion Matrix to Taggers (#2862)
+* Added warnings if .zip files exist without any corresponding .csv files. (#2908)
+* Fix `FileNotFoundError` when the `download_dir` is a non-existing nested folder (#2910)
+* Rename omw to omw-1.4 (#2907)
+* Resolve ReDoS opportunity by fixing incorrectly specified regex (#2906)
+* Support OMW 1.4 (#2899)
+* Deprecate Tree get and set node methods (#2900)
+* Fix broken inaugural test case (#2903)
+* Use Multilingual Wordnet Data from OMW with newer Wordnet versions (#2889)
+* Keep NLTKs "tokenize" module working with pathlib (#2896)
+* Make prettyprinter to be more readable (#2893)
+* Update links to the nltk book (#2895)
+* Add `CITATION.cff` to nltk (#2880)
+* Resolve serious ReDoS in PunktSentenceTokenizer (#2869)
+* Delete old CI config files (#2881)
+* Improve Tokenize documentation + add TokenizerI as superclass for TweetTokenizer (#2878)
+* Fix expected value for BLEU score doctest after changes from #2572
+* Add multi Bleu functionality and tests (#2793)
+* Deprecate 'return_str' parameter in NLTKWordTokenizer and TreebankWordTokenizer (#2883)
+* Allow empty string in CFG's + more (#2888)
+* Partition `tree.py` module into `tree` package + pickle fix (#2863)
+* Fix several TreebankWordTokenizer and NLTKWordTokenizer bugs (#2877)
+* Rewind Wordnet data file after each lookup (#2868)
+* Correct __init__ call for SyntaxCorpusReader subclasses (#2872)
+* Documentation fixes (#2873)
+* Fix levenstein distance for duplicated letters (#2849)
+* Support alternative Wordnet versions (#2860)
+* Remove hundreds of formatting warnings for nltk.org (#2859)
+* Modernize `nltk.org/howto` pages (#2856)
+* Fix Bleu Score smoothing function from taking log(0) (#2839)
+* Update third party tools to newer versions and removing MaltParser fixed version (#2832)
+* Fix TypeError: _pretty() takes 1 positional argument but 2 were given in sem/drt.py (#2854)
+* Replace `http` with `https` in most URLs (#2852)
+
+Thanks to the following contributors to 3.6.6:
+Adam Hawley, BatMrE, Danny Sepler, Eric Kafe, Gavish Poddar, Panagiotis Simakis,
+RnDevelover, Robby Horvath, Tom Aarsen, Yuta Nakamura, Mohaned Mashaly
+
 Version 3.6.5 2021-10-11
 
 * modernised nltk.org website
@@ -10,7 +253,7 @@ Version 3.6.5 2021-10-11
 * specify minimum regex version that supports regex.Pattern
 * avoid re.Pattern and regex.Pattern which fail for Python 3.6, 3.7
 
-Thanks to the following contributors to 3.6.5
+Thanks to the following contributors to 3.6.5:
 Tom Aarsen, Saibo Geng, Mohaned Mashaly, Dimitri Papadopoulos, Danny Sepler,
 Ahmet Yildirim, RnDevelover, yutanakamura
 
@@ -25,7 +268,7 @@ Version 3.6.4 2021-10-01
 * replace travis badge with github actions badge
 * add SECURITY.md
 
-Thanks to the following contributors to 3.6.4
+Thanks to the following contributors to 3.6.4:
 Tom Aarsen, Mohaned Mashaly, Dimitri Papadopoulos Orfanos, purificant, Danny Sepler
 
 Version 3.6.3 2021-09-19
@@ -46,7 +289,7 @@ Version 3.6.3 2021-09-19
 * Optional show arg for FreqDist.plot, ConditionalFreqDist.plot
 * edit_distance now computes Damerau-Levenshtein edit-distance
 
-Thanks to the following contributors to 3.6.3
+Thanks to the following contributors to 3.6.3:
 Tom Aarsen, Abhijnan Bajpai, Michael Wayne Goodman, Michał Górny, Maarten ter Huurne,
 Manu Joseph, Eric Kafe, Ilia Kurenkov, Daniel Loney, Rob Malouf, Mohaned Mashaly,
 purificant, Danny Sepler, Anthony Sottile
@@ -57,7 +300,7 @@ Version 3.6.2 2021-04-20
 * fix bug in NgramAssocMeasures (order preserving fix)
 * fixes for compatibility with Pypy 7.3.4
 
-Thanks to the following contributors to 3.6.2
+Thanks to the following contributors to 3.6.2:
 Ruben Cartuyvels, Rob Malouf, Dalton Pearson, Danny Sepler
 
 Version 3.6 2021-04-07
@@ -74,7 +317,7 @@ Version 3.6 2021-04-07
 
 Thanks to the following contributors to 3.6:
 Tom Aarsen, K Abainia, Akshita Bhagia, Andrew Bird, Thomas Bird,
-Tom Conroy, CubieDev, Christopher Hench, Andrew Jorgensen, Eric Kafe,
+Tom Conroy, Christopher Hench, Andrew Jorgensen, Eric Kafe,
 Ilia Kurenkov, Yeting Li, Joseph Manu, Marius Mather, Denali Molitor,
 Jacob Moorman, Philippe Ombredanne, Vassilis Palassopoulos, Ram Rachum,
 Danny Sepler, Or Sharir, Brad Solomon, Hiroki Teranishi, Constantin Weisser,

@@ -1,6 +1,6 @@
 # Natural Language Toolkit: Probability and Statistics
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Edward Loper <edloper@gmail.com>
 #         Steven Bird <stevenbird1@gmail.com> (additions)
 #         Trevor Cohn <tacohn@cs.mu.oz.au> (additions)
@@ -46,6 +46,7 @@ from collections import Counter, defaultdict
 from functools import reduce
 
 from nltk.internals import raise_unorderable_types
+from nltk.termsec import safe_print
 
 _NINF = float("-1e300")
 
@@ -245,7 +246,7 @@ class FreqDist(Counter):
         return self.most_common(1)[0][0]
 
     def plot(
-        self, *args, title="", cumulative=False, percents=False, show=True, **kwargs
+        self, *args, title="", cumulative=False, percents=False, show=False, **kwargs
     ):
         """
         Plot samples from the frequency distribution
@@ -337,11 +338,11 @@ class FreqDist(Counter):
         width = max(width, max(len("%d" % f) for f in freqs))
 
         for i in range(len(samples)):
-            print("%*s" % (width, samples[i]), end=" ")
-        print()
+            safe_print("%*s" % (width, samples[i]), end=" ")
+        safe_print()
         for i in range(len(samples)):
-            print("%*d" % (width, freqs[i]), end=" ")
-        print()
+            safe_print("%*d" % (width, freqs[i]), end=" ")
+        safe_print()
 
     def copy(self):
         """
@@ -452,7 +453,7 @@ class FreqDist(Counter):
         :type maxlen: int
         :param stream: The stream to print to. stdout by default
         """
-        print(self.pformat(maxlen=maxlen), file=stream)
+        safe_print(self.pformat(maxlen=maxlen), file=stream)
 
     def pformat(self, maxlen=10):
         """
@@ -719,7 +720,7 @@ class DictionaryProbDist(ProbDistI):
                     for x in prob_dict:
                         self._prob_dict[x] = logp
                 else:
-                    for (x, p) in self._prob_dict.items():
+                    for x, p in self._prob_dict.items():
                         self._prob_dict[x] -= value_sum
             else:
                 value_sum = sum(self._prob_dict.values())
@@ -729,7 +730,7 @@ class DictionaryProbDist(ProbDistI):
                         self._prob_dict[x] = p
                 else:
                     norm_factor = 1.0 / value_sum
-                    for (x, p) in self._prob_dict.items():
+                    for x, p in self._prob_dict.items():
                         self._prob_dict[x] *= norm_factor
 
     def prob(self, sample):
@@ -1444,7 +1445,7 @@ class SimpleGoodTuringProbDist(ProbDistI):
         xy_cov = x_var = 0.0
         x_mean = sum(log_r) / len(log_r)
         y_mean = sum(log_zr) / len(log_zr)
-        for (x, y) in zip(log_r, log_zr):
+        for x, y in zip(log_r, log_zr):
             xy_cov += (x - x_mean) * (y - y_mean)
             x_var += (x - x_mean) ** 2
         self._slope = xy_cov / x_var if x_var != 0 else 0.0
@@ -1481,7 +1482,7 @@ class SimpleGoodTuringProbDist(ProbDistI):
         r = float(r)
         nr = float(nr)
         nr_1 = float(nr_1)
-        return (r + 1.0) ** 2 * (nr_1 / nr ** 2) * (1.0 + nr_1 / nr)
+        return (r + 1.0) ** 2 * (nr_1 / nr**2) * (1.0 + nr_1 / nr)
 
     def _renormalize(self, r, nr):
         """
@@ -1552,7 +1553,7 @@ class SimpleGoodTuringProbDist(ProbDistI):
         prob_sum = 0.0
         for i in range(0, len(self._Nr)):
             prob_sum += self._Nr[i] * self._prob_measure(i) / self._renormal
-        print("Probability Sum:", prob_sum)
+        safe_print("Probability Sum:", prob_sum)
         # assert prob_sum != 1.0, "probability sum should be one!"
 
     def discount(self):
@@ -1891,7 +1892,7 @@ class ConditionalFreqDist(defaultdict):
         defaultdict.__init__(self, FreqDist)
 
         if cond_samples:
-            for (cond, sample) in cond_samples:
+            for cond, sample in cond_samples:
                 self[cond][sample] += 1
 
     def __reduce__(self):
@@ -1927,7 +1928,7 @@ class ConditionalFreqDist(defaultdict):
         cumulative=False,
         percents=False,
         conditions=None,
-        show=True,
+        show=False,
         **kwargs,
     ):
         """
@@ -2041,15 +2042,15 @@ class ConditionalFreqDist(defaultdict):
             width = max(width, max(len("%d" % f) for f in freqs[c]))
 
         condition_size = max(len("%s" % c) for c in conditions)
-        print(" " * condition_size, end=" ")
+        safe_print(" " * condition_size, end=" ")
         for s in samples:
-            print("%*s" % (width, s), end=" ")
-        print()
+            safe_print("%*s" % (width, s), end=" ")
+        safe_print()
         for c in conditions:
-            print("%*s" % (condition_size, c), end=" ")
+            safe_print("%*s" % (condition_size, c), end=" ")
             for f in freqs[c]:
-                print("%*d" % (width, f), end=" ")
-            print()
+                safe_print("%*d" % (width, f), end=" ")
+            safe_print()
 
     # Mathematical operators
 
@@ -2059,16 +2060,9 @@ class ConditionalFreqDist(defaultdict):
         """
         if not isinstance(other, ConditionalFreqDist):
             return NotImplemented
-        result = ConditionalFreqDist()
-        for cond in self.conditions():
-            newfreqdist = self[cond] + other[cond]
-            if newfreqdist:
-                result[cond] = newfreqdist
+        result = self.copy()
         for cond in other.conditions():
-            if cond not in self.conditions():
-                for elem, count in other[cond].items():
-                    if count > 0:
-                        result[cond][elem] = count
+            result[cond] += other[cond]
         return result
 
     def __sub__(self, other):
@@ -2077,16 +2071,11 @@ class ConditionalFreqDist(defaultdict):
         """
         if not isinstance(other, ConditionalFreqDist):
             return NotImplemented
-        result = ConditionalFreqDist()
-        for cond in self.conditions():
-            newfreqdist = self[cond] - other[cond]
-            if newfreqdist:
-                result[cond] = newfreqdist
+        result = self.copy()
         for cond in other.conditions():
-            if cond not in self.conditions():
-                for elem, count in other[cond].items():
-                    if count < 0:
-                        result[cond][elem] = 0 - count
+            result[cond] -= other[cond]
+            if not result[cond]:
+                del result[cond]
         return result
 
     def __or__(self, other):
@@ -2095,16 +2084,9 @@ class ConditionalFreqDist(defaultdict):
         """
         if not isinstance(other, ConditionalFreqDist):
             return NotImplemented
-        result = ConditionalFreqDist()
-        for cond in self.conditions():
-            newfreqdist = self[cond] | other[cond]
-            if newfreqdist:
-                result[cond] = newfreqdist
+        result = self.copy()
         for cond in other.conditions():
-            if cond not in self.conditions():
-                for elem, count in other[cond].items():
-                    if count > 0:
-                        result[cond][elem] = count
+            result[cond] |= other[cond]
         return result
 
     def __and__(self, other):
@@ -2142,6 +2124,13 @@ class ConditionalFreqDist(defaultdict):
         if not isinstance(other, ConditionalFreqDist):
             raise_unorderable_types(">", self, other)
         return other < self
+
+    def deepcopy(self):
+        from copy import deepcopy
+
+        return deepcopy(self)
+
+    copy = deepcopy
 
     def __repr__(self):
         """
@@ -2220,7 +2209,7 @@ class ConditionalProbDist(ConditionalProbDistI):
         >>> cpdist = ConditionalProbDist(cfdist, ELEProbDist, 10)
         >>> cpdist['passed'].max()
         'VBD'
-        >>> cpdist['passed'].prob('VBD')
+        >>> cpdist['passed'].prob('VBD') #doctest: +ELLIPSIS
         0.423...
 
     """
@@ -2509,38 +2498,40 @@ def demo(numsamples=6, numoutcomes=500):
         vals.append(tuple([n, fdist1.freq(n)] + [pdist.prob(n) for pdist in pdists]))
 
     # Print the results in a formatted table.
-    print(
+    safe_print(
         "%d samples (1-%d); %d outcomes were sampled for each FreqDist"
         % (numsamples, numsamples, numoutcomes)
     )
-    print("=" * 9 * (len(pdists) + 2))
+    safe_print("=" * 9 * (len(pdists) + 2))
     FORMATSTR = "      FreqDist " + "%8s " * (len(pdists) - 1) + "|  Actual"
-    print(FORMATSTR % tuple(repr(pdist)[1:9] for pdist in pdists[:-1]))
-    print("-" * 9 * (len(pdists) + 2))
+    safe_print(FORMATSTR % tuple(repr(pdist)[1:9] for pdist in pdists[:-1]))
+    safe_print("-" * 9 * (len(pdists) + 2))
     FORMATSTR = "%3d   %8.6f " + "%8.6f " * (len(pdists) - 1) + "| %8.6f"
     for val in vals:
-        print(FORMATSTR % val)
+        safe_print(FORMATSTR % val)
 
     # Print the totals for each column (should all be 1.0)
     zvals = list(zip(*vals))
     sums = [sum(val) for val in zvals[1:]]
-    print("-" * 9 * (len(pdists) + 2))
+    safe_print("-" * 9 * (len(pdists) + 2))
     FORMATSTR = "Total " + "%8.6f " * (len(pdists)) + "| %8.6f"
-    print(FORMATSTR % tuple(sums))
-    print("=" * 9 * (len(pdists) + 2))
+    safe_print(FORMATSTR % tuple(sums))
+    safe_print("=" * 9 * (len(pdists) + 2))
 
     # Display the distributions themselves, if they're short enough.
     if len("%s" % fdist1) < 70:
-        print("  fdist1: %s" % fdist1)
-        print("  fdist2: %s" % fdist2)
-        print("  fdist3: %s" % fdist3)
-    print()
+        safe_print("  fdist1: %s" % fdist1)
+        safe_print("  fdist2: %s" % fdist2)
+        safe_print("  fdist3: %s" % fdist3)
+    safe_print()
 
-    print("Generating:")
+    safe_print("Generating:")
     for pdist in pdists:
         fdist = FreqDist(pdist.generate() for i in range(5000))
-        print("{:>20} {}".format(pdist.__class__.__name__[:20], ("%s" % fdist)[:55]))
-    print()
+        safe_print(
+            "{:>20} {}".format(pdist.__class__.__name__[:20], ("%s" % fdist)[:55])
+        )
+    safe_print()
 
 
 def gt_demo():
@@ -2549,12 +2540,12 @@ def gt_demo():
     emma_words = corpus.gutenberg.words("austen-emma.txt")
     fd = FreqDist(emma_words)
     sgt = SimpleGoodTuringProbDist(fd)
-    print("{:>18} {:>8}  {:>14}".format("word", "frequency", "SimpleGoodTuring"))
+    safe_print("{:>18} {:>8}  {:>14}".format("word", "frequency", "SimpleGoodTuring"))
     fd_keys_sorted = (
         key for key, value in sorted(fd.items(), key=lambda item: item[1], reverse=True)
     )
     for key in fd_keys_sorted:
-        print("%18s %8d  %14e" % (key, fd[key], sgt.prob(key)))
+        safe_print("%18s %8d  %14e" % (key, fd[key], sgt.prob(key)))
 
 
 if __name__ == "__main__":

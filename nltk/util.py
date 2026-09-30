@@ -1,23 +1,22 @@
 # Natural Language Toolkit: Utility functions
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Steven Bird <stevenbird1@gmail.com>
 #         Eric Kafe <kafe.eric@gmail.com> (acyclic closures)
 # URL: <https://www.nltk.org/>
 # For license information, see LICENSE.TXT
-
-import bisect
 import inspect
 import locale
+import math
 import os
 import pydoc
 import re
-import sys
 import textwrap
-import types
+import unicodedata
 import warnings
 from collections import defaultdict, deque
 from itertools import chain, combinations, islice, tee
+from pathlib import Path
 from pprint import pprint
 from urllib.request import (
     HTTPPasswordMgrWithDefaultRealm,
@@ -29,8 +28,16 @@ from urllib.request import (
     install_opener,
 )
 
+from nltk import redos
 from nltk.collections import *
 from nltk.internals import deprecated, raise_unorderable_types, slice_bounds
+from nltk.pathsec import open as _secure_open
+from nltk.termsec import safe_print, sanitize_terminal
+
+# Maximum recursion depth for graph traversal functions.
+# 500 is well above the longest legitimate WordNet chain (~20 edges)
+# and matches the existing MAX_TREE_DEPTH constant in tree.py.
+MAX_RECURSION_DEPTH = 500
 
 ######################################################################
 # Short usage message
@@ -44,8 +51,8 @@ def usage(obj):
     if not isinstance(obj, type):
         obj = obj.__class__
 
-    print(f"{obj.__name__} supports the following operations:")
-    for (name, method) in sorted(pydoc.allmethods(obj).items()):
+    safe_print(f"{obj.__name__} supports the following operations:")
+    for name, method in sorted(pydoc.allmethods(obj).items()):
         if name.startswith("_"):
             continue
         if getattr(method, "__deprecated__", False):
@@ -67,7 +74,7 @@ def usage(obj):
         elif args and args[0] == "self":
             name = f"self.{name}"
             args.pop(0)
-        print(
+        safe_print(
             textwrap.fill(
                 f"{name}({', '.join(args)})",
                 initial_indent="  - ",
@@ -125,7 +132,7 @@ def print_string(s, width=70):
     :param width: the display width
     :type width: int
     """
-    print("\n".join(textwrap.wrap(s, width=width)))
+    safe_print("\n".join(textwrap.wrap(s, width=width)))
 
 
 def tokenwrap(tokens, separator=" ", width=70):
@@ -140,6 +147,41 @@ def tokenwrap(tokens, separator=" ", width=70):
     :type width: int
     """
     return "\n".join(textwrap.wrap(separator.join(tokens), width=width))
+
+
+def cut_string(s, width=70):
+    """
+    Cut off and return a given width of a string
+
+    Return the same as s[:width] if width >= 0 or s[-width:] if
+    width < 0, as long as s has no unicode combining characters.
+    If it has combining characters make sure the returned string's
+    visible width matches the called-for width.
+
+    :param s: the string to cut
+    :type s: str
+    :param width: the display_width
+    :type width: int
+    """
+    chars_sofar = 0
+    width_sofar = 0
+    result = ""
+
+    abs_width = abs(width)
+    max_chars = len(s)
+    while width_sofar < abs_width and chars_sofar < max_chars:
+        if width < 0:
+            char = s[-(chars_sofar + 1)]
+            result = char + result
+        else:
+            char = s[chars_sofar]
+            result = result + char
+
+        chars_sofar += 1
+        if not unicodedata.combining(char):
+            width_sofar += 1
+
+    return result
 
 
 ##########################################################################
@@ -175,22 +217,66 @@ def re_show(regexp, string, left="{", right="}"):
     :type right: str
     :rtype: str
     """
-    print(re.compile(regexp, re.M).sub(left + r"\g<0>" + right, string.rstrip()))
+    # regexp and string are both caller-supplied, so a catastrophically
+    # backtracking pattern hangs the process (CWE-1333). redos.compile bounds it.
+    safe_print(
+        redos.compile(regexp, re.M).sub(left + r"\g<0>" + right, string.rstrip())
+    )
 
 
 ##########################################################################
 # READ FROM FILE OR STRING
 ##########################################################################
 
+
 # recipe from David Mertz
-def filestring(f):
+def filestring(f, allowed_dir=None):
+    """
+    Read a file path or file-like object into a string.
+
+    Security:
+    - Paths are resolved via ``Path.resolve()`` to prevent
+      symlink and ``../`` traversal attacks.
+    - If ``allowed_dir`` is provided, the resolved path must
+      fall within that directory tree.
+    - All file opens go through ``pathsec.open``, which
+      validates paths against NLTK's allowed data roots.
+    - File-like objects with a ``.read()`` method are passed
+      through without path checks.
+
+    :param f: a file path or file-like object with a ``.read()`` method
+    :param allowed_dir: if provided, restricts file access to paths
+        within this directory; raises ``PermissionError`` if the
+        resolved path falls outside it
+    :raises PermissionError: if ``allowed_dir`` is set and ``f``
+        resolves outside it, or if pathsec blocks the path
+    :rtype: str
+    """
     if hasattr(f, "read"):
         return f.read()
     elif isinstance(f, str):
-        with open(f) as infile:
+        # FIX: Resolve the path once to prevent symlink/rename races
+        target_path = Path(f).resolve()
+
+        if allowed_dir is not None:
+            safe_root = Path(allowed_dir).resolve()
+            # FIX: Use is_relative_to for robust boundary check
+            if not target_path.is_relative_to(safe_root):
+                raise PermissionError(
+                    f"Security Violation: Path {target_path} is outside allowed_dir {safe_root}"
+                )
+
+        # FIX: Use _secure_open with the resolved target_path
+        with _secure_open(target_path, encoding="utf-8", errors="ignore") as infile:
             return infile.read()
-    else:
-        raise ValueError("Must be called with a filename or file-like object")
+
+    # Fallback for other types
+    try:
+        with _secure_open(f, encoding="utf-8", errors="ignore") as infile:
+            return infile.read()
+    except UnicodeDecodeError:
+        with _secure_open(f, encoding="latin-1") as infile:
+            return infile.read()
 
 
 ##########################################################################
@@ -224,7 +310,13 @@ def breadth_first(tree, children=iter, maxdepth=-1):
 
 
 def edge_closure(tree, children=iter, maxdepth=-1, verbose=False):
-    """Yield the edges of a graph in breadth-first order,
+    """
+    :param tree: the tree root
+    :param children: a function taking as argument a tree node
+    :param maxdepth: to limit the search depth
+    :param verbose: to print warnings when cycles are discarded
+
+    Yield the edges of a graph in breadth-first order,
     discarding eventual cycles.
     The first argument should be the start node;
     children should be a function taking as argument a graph node
@@ -248,9 +340,9 @@ def edge_closure(tree, children=iter, maxdepth=-1, verbose=False):
                     else:
                         if verbose:
                             warnings.warn(
-                                f"Discarded redundant search for {child} at depth {depth + 1}",
+                                f"Discarded redundant search for {sanitize_terminal(child)} at depth {depth + 1}",
                                 stacklevel=2,
-                            )
+                            )  # unsafe-print ok: node text sanitised; depth is an int
                     edge = (node, child)
                     if edge not in edges:
                         yield edge
@@ -262,13 +354,13 @@ def edge_closure(tree, children=iter, maxdepth=-1, verbose=False):
 def edges2dot(edges, shapes=None, attr=None):
     """
     :param edges: the set (or list) of edges of a directed graph.
-
-    :return dot_string: a representation of 'edges' as a string in the DOT
-        graph language, which can be converted to an image by the 'dot' program
-        from the Graphviz package, or nltk.parse.dependencygraph.dot2img(dot_string).
-
     :param shapes: dictionary of strings that trigger a specified shape.
     :param attr: dictionary with global graph attributes
+    :return: a representation of 'edges' as a string in the DOT graph language.
+
+    Returns dot_string: a representation of 'edges' as a string in the DOT
+    graph language, which can be converted to an image by the 'dot' program
+    from the Graphviz package, or nltk.parse.dependencygraph.dot2img(dot_string).
 
     >>> import nltk
     >>> from nltk.util import edges2dot
@@ -279,6 +371,7 @@ def edges2dot(edges, shapes=None, attr=None):
     "B" -> "C";
     "C" -> "B";
     }
+    <BLANKLINE>
     """
     if not shapes:
         shapes = dict()
@@ -303,8 +396,12 @@ def edges2dot(edges, shapes=None, attr=None):
 
 def unweighted_minimum_spanning_digraph(tree, children=iter, shapes=None, attr=None):
     """
+    :param tree: the tree root
+    :param children: a function taking as argument a tree node
+    :param shapes: dictionary of strings that trigger a specified shape.
+    :param attr: dictionary with global graph attributes
 
-    Build a Minimum Spanning Tree (MST) of an unweighted graph,
+        Build a Minimum Spanning Tree (MST) of an unweighted graph,
     by traversing the nodes of a tree in breadth-first order,
     discarding eventual cycles.
 
@@ -319,7 +416,7 @@ def unweighted_minimum_spanning_digraph(tree, children=iter, shapes=None, attr=N
     >>> import nltk
     >>> wn=nltk.corpus.wordnet
     >>> from nltk.util import unweighted_minimum_spanning_digraph as umsd
-    >>> print(umsd(wn.synset('bound.a.01'), lambda s:s.also_sees()))
+    >>> print(umsd(wn.synset('bound.a.01'), lambda s:sorted(s.also_sees())))
     digraph G {
     "Synset('bound.a.01')" -> "Synset('unfree.a.02')";
     "Synset('unfree.a.02')" -> "Synset('confined.a.02')";
@@ -327,7 +424,7 @@ def unweighted_minimum_spanning_digraph(tree, children=iter, shapes=None, attr=N
     "Synset('unfree.a.02')" -> "Synset('restricted.a.01')";
     "Synset('restricted.a.01')" -> "Synset('classified.a.02')";
     }
-
+    <BLANKLINE>
     """
     return edges2dot(
         edge_closure(
@@ -343,8 +440,16 @@ def unweighted_minimum_spanning_digraph(tree, children=iter, shapes=None, attr=N
 ##########################################################################
 
 
-def acyclic_breadth_first(tree, children=iter, maxdepth=-1):
-    """Traverse the nodes of a tree in breadth-first order,
+def acyclic_breadth_first(tree, children=iter, maxdepth=-1, verbose=False):
+    """
+    :param tree: the tree root
+    :param children: a function taking as argument a tree node
+    :param maxdepth: to limit the search depth
+    :param verbose: to print warnings when cycles are discarded
+    :return: the tree in breadth-first order
+
+        Adapted from breadth_first() above, to discard cycles.
+    Traverse the nodes of a tree in breadth-first order,
     discarding eventual cycles.
 
     The first argument should be the tree root;
@@ -355,6 +460,8 @@ def acyclic_breadth_first(tree, children=iter, maxdepth=-1):
     queue = deque([(tree, 0)])
     while queue:
         node, depth = queue.popleft()
+        if node in traversed:
+            continue
         yield node
         traversed.add(node)
         if depth != maxdepth:
@@ -362,33 +469,44 @@ def acyclic_breadth_first(tree, children=iter, maxdepth=-1):
                 for child in children(node):
                     if child not in traversed:
                         queue.append((child, depth + 1))
-                    else:
+                    elif verbose:
                         warnings.warn(
                             "Discarded redundant search for {} at depth {}".format(
-                                child, depth + 1
+                                sanitize_terminal(child), depth + 1
                             ),
                             stacklevel=2,
-                        )
+                        )  # unsafe-print ok: node text sanitised; depth is an int
             except TypeError:
                 pass
 
 
-def acyclic_depth_first(tree, children=iter, depth=-1, cut_mark=None, traversed=None):
-    """Traverse the nodes of a tree in depth-first order,
-    discarding eventual cycles within any branch,
-    adding cut_mark (when specified) if cycles were truncated.
+# ==========================================================================
 
-    The first argument should be the tree root;
-    children should be a function taking as argument a tree node
-    and returning an iterator of the node's children.
 
+def acyclic_depth_first(
+    tree, children=iter, depth=-1, cut_mark=None, traversed=None, verbose=False
+):
+    """
+    :param tree: the tree root
+    :param children: a function taking as argument a tree node
+    :param depth: the maximum depth of the search. Use -1 (default) for unbounded,
+                  but note that it is capped to MAX_RECURSION_DEPTH to prevent stack overflow.
+    :param cut_mark: the mark to add when cycles are truncated
+    :param traversed: the set of traversed nodes
+    :param verbose: to print warnings when cycles are discarded
+    :return: the tree in depth-first order
+    Traverse the nodes of a tree in depth-first order, discarding
+    eventual cycles within any branch, adding cut_mark (when specified)
+    if cycles were truncated.
+    The first argument should be the tree root; children should be a
+    function taking as argument a tree node and returning an iterator
+    of the node's children.
     Catches all cycles:
-
     >>> import nltk
-    >>> from nltk.util import acyclic_depth_first as acyclic_tree
+    >>> from nltk.util import acyclic_depth_first as acyclic_tree  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
     >>> wn=nltk.corpus.wordnet
     >>> from pprint import pprint
-    >>> pprint(acyclic_tree(wn.synset('dog.n.01'), lambda s:s.hypernyms(),cut_mark='...'))
+    >>> pprint(acyclic_tree(wn.synset('dog.n.01'), lambda s:sorted(s.hypernyms()),cut_mark='...'))
     [Synset('dog.n.01'),
      [Synset('canine.n.02'),
       [Synset('carnivore.n.01'),
@@ -403,8 +521,13 @@ def acyclic_depth_first(tree, children=iter, depth=-1, cut_mark=None, traversed=
                [Synset('object.n.01'),
                 [Synset('physical_entity.n.01'),
                  [Synset('entity.n.01')]]]]]]]]]]]]],
-     [Synset('domestic_animal.n.01'), "Cycle(Synset('animal.n.01'),-3,...)"]]
+     [Synset('domestic_animal.n.01'), "Cycle(Synset('animal.n.01'),...,...)"]]
     """
+    # Ensure depth is valid (GHSA-8846-p9w9-5frf)
+    if depth < -1:
+        raise ValueError("depth must be >= -1 (use -1 for unbounded, now capped)")
+    if depth == -1:
+        depth = MAX_RECURSION_DEPTH
     if traversed is None:
         traversed = {tree}
     out_tree = [tree]
@@ -412,20 +535,24 @@ def acyclic_depth_first(tree, children=iter, depth=-1, cut_mark=None, traversed=
         try:
             for child in children(tree):
                 if child not in traversed:
-                    # Recurse with a common "traversed" set for all children:
                     traversed.add(child)
                     out_tree += [
                         acyclic_depth_first(
-                            child, children, depth - 1, cut_mark, traversed
+                            child,
+                            children,
+                            depth - 1,
+                            cut_mark,
+                            traversed,
                         )
                     ]
                 else:
-                    warnings.warn(
-                        "Discarded redundant search for {} at depth {}".format(
-                            child, depth - 1
-                        ),
-                        stacklevel=3,
-                    )
+                    if verbose:
+                        warnings.warn(
+                            "Discarded redundant search for {} at depth {}".format(
+                                sanitize_terminal(child), depth - 1
+                            ),
+                            stacklevel=3,
+                        )  # unsafe-print ok: node text sanitised; depth is an int
                     if cut_mark:
                         out_tree += [f"Cycle({child},{depth - 1},{cut_mark})"]
         except TypeError:
@@ -436,25 +563,31 @@ def acyclic_depth_first(tree, children=iter, depth=-1, cut_mark=None, traversed=
 
 
 def acyclic_branches_depth_first(
-    tree, children=iter, depth=-1, cut_mark=None, traversed=None
+    tree, children=iter, depth=-1, cut_mark=None, traversed=None, verbose=False
 ):
-    """Traverse the nodes of a tree in depth-first order,
-    discarding eventual cycles within the same branch,
-    but keep duplicate paths in different branches.
+    """
+    :param tree: the tree root
+    :param children: a function taking as argument a tree node
+    :param depth: the maximum depth of the search. Use -1 (default) for unbounded,
+                  but note that it is capped to MAX_RECURSION_DEPTH to prevent stack overflow.
+    :param cut_mark: the mark to add when cycles are truncated
+    :param traversed: the set of traversed nodes
+    :param verbose: to print warnings when cycles are discarded
+    :return: the tree in depth-first order
+    Adapted from acyclic_depth_first() above, to traverse the nodes
+    of a tree in depth-first order, discarding eventual cycles within
+    the same branch, but keep duplicate paths in different branches.
     Add cut_mark (when defined) if cycles were truncated.
-
-    The first argument should be the tree root;
-    children should be a function taking as argument a tree node
-    and returning an iterator of the node's children.
-
-    Catches only only cycles within the same branch,
-    but keeping cycles from different branches:
-
+    The first argument should be the tree root; children should be a
+    function taking as argument a tree node and returning an iterator
+    of the node's children.
+    Catches only only cycles within the same branch, but keeping cycles
+    from different branches:
     >>> import nltk
-    >>> from nltk.util import acyclic_branches_depth_first as tree
+    >>> from nltk.util import acyclic_branches_depth_first as tree  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
     >>> wn=nltk.corpus.wordnet
     >>> from pprint import pprint
-    >>> pprint(tree(wn.synset('certified.a.01'), lambda s:s.also_sees(), cut_mark='...', depth=4))
+    >>> pprint(tree(wn.synset('certified.a.01'), lambda s:sorted(s.also_sees()), cut_mark='...', depth=4))
     [Synset('certified.a.01'),
      [Synset('authorized.a.01'),
       [Synset('lawful.a.01'),
@@ -475,6 +608,13 @@ def acyclic_branches_depth_first(
       [Synset('official.a.01'), "Cycle(Synset('authorized.a.01'),1,...)"]],
      [Synset('documented.a.01')]]
     """
+    # Ensure depth is valid
+    if depth < -1:
+        raise ValueError("depth must be >= -1 (use -1 for unbounded, now capped)")
+    # Cap unbounded depth to prevent recursion overflow (GHSA-8846-p9w9-5frf)
+    if depth == -1:
+        depth = MAX_RECURSION_DEPTH
+    # User-provided depths are accepted as given.
     if traversed is None:
         traversed = {tree}
     out_tree = [tree]
@@ -482,7 +622,6 @@ def acyclic_branches_depth_first(
         try:
             for child in children(tree):
                 if child not in traversed:
-                    # Recurse with a different "traversed" set for each child:
                     out_tree += [
                         acyclic_branches_depth_first(
                             child,
@@ -493,12 +632,13 @@ def acyclic_branches_depth_first(
                         )
                     ]
                 else:
-                    warnings.warn(
-                        "Discarded redundant search for {} at depth {}".format(
-                            child, depth - 1
-                        ),
-                        stacklevel=3,
-                    )
+                    if verbose:
+                        warnings.warn(
+                            "Discarded redundant search for {} at depth {}".format(
+                                sanitize_terminal(child), depth - 1
+                            ),
+                            stacklevel=3,
+                        )  # unsafe-print ok: node text sanitised; depth is an int
                     if cut_mark:
                         out_tree += [f"Cycle({child},{depth - 1},{cut_mark})"]
         except TypeError:
@@ -508,16 +648,63 @@ def acyclic_branches_depth_first(
     return out_tree
 
 
-def acyclic_dic2tree(node, dic):
-    """Convert acyclic dictionary 'dic', where the keys are nodes, and the
-    values are lists of children, to output tree suitable for pprint(),
-    starting at root 'node', with subtrees as nested lists."""
-    return [node] + [acyclic_dic2tree(child, dic) for child in dic[node]]
+def acyclic_dic2tree(node, dic, depth=-1, traversed=None, verbose=False):
+    """
+    :param node: the root node
+    :param dic: the dictionary of children
+    :param depth: the maximum depth of the search. Use -1 (default) for unbounded,
+                  but note that it is capped to MAX_RECURSION_DEPTH to prevent stack overflow.
+    :param traversed: the set of traversed nodes
+    :param verbose: to print warnings when cycles are discarded
+    :return: the tree in depth-first order
+    Convert acyclic dictionary 'dic', where the keys are nodes, and the values
+    are lists of children, to output tree suitable for pprint(), starting at
+    root 'node', with subtrees as nested lists. Discards eventual cycles.
+    """
+    # Ensure depth is valid (GHSA-8846-p9w9-5frf)
+    if depth < -1:
+        raise ValueError("depth must be >= -1 (use -1 for unbounded, now capped)")
+    if depth == -1:
+        depth = MAX_RECURSION_DEPTH
+    # User-provided depths are accepted as given.
+    if traversed is None:
+        traversed = {node}
+    out_tree = [node]
+    if depth != 0:
+        try:
+            for child in dic[node]:
+                if child not in traversed:
+                    out_tree += [
+                        acyclic_dic2tree(
+                            child,
+                            dic,
+                            depth - 1,
+                            traversed.union({child}),
+                            verbose,
+                        )
+                    ]
+                else:
+                    if verbose:
+                        warnings.warn(
+                            "Discarded redundant search for {} at depth {}".format(
+                                sanitize_terminal(child), depth - 1
+                            ),
+                            stacklevel=3,
+                        )  # unsafe-print ok: node text sanitised; depth is an int
+        except TypeError:
+            pass
+    return out_tree
+
+
+# ==========================================================================
 
 
 def unweighted_minimum_spanning_dict(tree, children=iter):
     """
-    Output a dictionary representing a Minimum Spanning Tree (MST)
+    :param tree: the tree root
+    :param children: a function taking as argument a tree node
+
+            Output a dictionary representing a Minimum Spanning Tree (MST)
     of an unweighted graph, by traversing the nodes of a tree in
     breadth-first order, discarding eventual cycles.
 
@@ -529,7 +716,7 @@ def unweighted_minimum_spanning_dict(tree, children=iter):
     >>> from nltk.corpus import wordnet as wn
     >>> from nltk.util import unweighted_minimum_spanning_dict as umsd
     >>> from pprint import pprint
-    >>> pprint(umsd(wn.synset('bound.a.01'), lambda s:s.also_sees()))
+    >>> pprint(umsd(wn.synset('bound.a.01'), lambda s:sorted(s.also_sees())))
     {Synset('bound.a.01'): [Synset('unfree.a.02')],
      Synset('classified.a.02'): [],
      Synset('confined.a.02'): [],
@@ -559,7 +746,10 @@ def unweighted_minimum_spanning_dict(tree, children=iter):
 
 def unweighted_minimum_spanning_tree(tree, children=iter):
     """
-    Output a Minimum Spanning Tree (MST) of an unweighted graph,
+    :param tree: the tree root
+    :param children: a function taking as argument a tree node
+
+       Output a Minimum Spanning Tree (MST) of an unweighted graph,
     by traversing the nodes of a tree in breadth-first order,
     discarding eventual cycles.
 
@@ -571,7 +761,7 @@ def unweighted_minimum_spanning_tree(tree, children=iter):
     >>> from nltk.util import unweighted_minimum_spanning_tree as mst
     >>> wn=nltk.corpus.wordnet
     >>> from pprint import pprint
-    >>> pprint(mst(wn.synset('bound.a.01'), lambda s:s.also_sees()))
+    >>> pprint(mst(wn.synset('bound.a.01'), lambda s:sorted(s.also_sees())))
     [Synset('bound.a.01'),
      [Synset('unfree.a.02'),
       [Synset('confined.a.02')],
@@ -860,14 +1050,15 @@ def ngrams(sequence, n, **kwargs):
     """
     sequence = pad_sequence(sequence, n, **kwargs)
 
-    # Creates the sliding window, of n no. of items.
-    # `iterables` is a tuple of iterables where each iterable is a window of n items.
-    iterables = tee(sequence, n)
-
-    for i, sub_iterable in enumerate(iterables):  # For each window,
-        for _ in range(i):  # iterate through every order of ngrams
-            next(sub_iterable, None)  # generate the ngrams within the window.
-    return zip(*iterables)  # Unpack and flattens the iterables.
+    # sliding_window('ABCDEFG', 4) --> ABCD BCDE CDEF DEFG
+    # https://docs.python.org/3/library/itertools.html?highlight=sliding_window#itertools-recipes
+    it = iter(sequence)
+    window = deque(islice(it, n), maxlen=n)
+    if len(window) == n:
+        yield tuple(window)
+    for x in it:
+        window.append(x)
+        yield tuple(window)
 
 
 def bigrams(sequence, **kwargs):
@@ -908,6 +1099,19 @@ def trigrams(sequence, **kwargs):
     yield from ngrams(sequence, 3, **kwargs)
 
 
+#: Largest sequence length for which :func:`everygrams` will expand the default
+#: ``max_len`` sentinel to the full sequence length. Enumerating every n-gram of
+#: every length from ``min_len`` to ``len(sequence)`` over each window yields
+#: O(n**2) tuples totalling O(n**3) elements, so leaving ``max_len`` at its
+#: default over a few-thousand-token sequence allocates gigabytes and OOM-kills
+#: the process (CWE-770). When the defaulted ``max_len`` would exceed this,
+#: ``everygrams`` raises ``ValueError`` asking for an explicit ``max_len``. This
+#: only affects the default; an explicitly supplied ``max_len`` is never capped.
+MAX_EVERYGRAMS_DEFAULT_LEN = 256
+
+MAX_SKIPGRAMS_COMBINATIONS_PER_WINDOW = 1_000_000
+
+
 def everygrams(
     sequence, min_len=1, max_len=-1, pad_left=False, pad_right=False, **kwargs
 ):
@@ -939,6 +1143,10 @@ def everygrams(
     :param pad_right: whether the ngrams should be right-padded
     :type pad_right: bool
     :rtype: iter(tuple)
+    :raise ValueError: if ``max_len`` is left at its default and the sequence is
+        longer than ``MAX_EVERYGRAMS_DEFAULT_LEN``, since enumerating every
+        n-gram of every length would allocate O(n**3) elements and exhaust
+        memory (CWE-770). Pass an explicit ``max_len`` to bound the n-gram order.
     """
 
     # Get max_len for padding.
@@ -948,6 +1156,19 @@ def everygrams(
         except TypeError:
             sequence = list(sequence)
             max_len = len(sequence)
+        # The default max_len expands to the full sequence length, which makes
+        # everygrams enumerate O(n**2) tuples totalling O(n**3) elements -- a
+        # few-thousand-token sequence then allocates gigabytes (CWE-770). Refuse
+        # the unbounded default for long sequences instead of OOM-ing; an
+        # explicit max_len (an informed choice) is never capped.
+        if max_len > MAX_EVERYGRAMS_DEFAULT_LEN:
+            raise ValueError(
+                "everygrams() called with the default max_len on a sequence of "
+                "%d items: enumerating every n-gram of every length up to %d "
+                "yields O(n**2) tuples (O(n**3) elements) and can exhaust memory "
+                "(CWE-770). Pass an explicit max_len (e.g. max_len=min_len), or "
+                "raise nltk.util.MAX_EVERYGRAMS_DEFAULT_LEN." % (max_len, max_len)
+            )
 
     # Pad if indicated using max_len.
     sequence = pad_sequence(sequence, max_len, pad_left, pad_right, **kwargs)
@@ -989,6 +1210,33 @@ def skipgrams(sequence, n, k, **kwargs):
     :type  k: int
     :rtype: iter(tuple)
     """
+    if n < 1:
+        raise ValueError("n must be greater than or equal to 1")
+    if k < 0:
+        raise ValueError("k must be greater than or equal to 0")
+
+    # Fast-path / safety check for n == 1 (no skip-tail combinations needed)
+    if n == 1:
+        if "pad_left" in kwargs or "pad_right" in kwargs:
+            sequence = pad_sequence(sequence, n, **kwargs)
+        for ngram in ngrams(sequence, 1 + k, pad_right=True, right_pad_symbol=object()):
+            if ngram[0] is not object():
+                yield (ngram[0],)
+        return
+
+    # Pre-check bounds before math.comb to prevent big-integer performance spikes on huge inputs
+    if (
+        n > MAX_SKIPGRAMS_COMBINATIONS_PER_WINDOW
+        or k > MAX_SKIPGRAMS_COMBINATIONS_PER_WINDOW
+    ):
+        raise ValueError(f"Skipgram parameters n={n} and k={k} are excessively large.")
+
+    if (n + k - 1) >= (n - 1):
+        if math.comb(n + k - 1, n - 1) > MAX_SKIPGRAMS_COMBINATIONS_PER_WINDOW:
+            raise ValueError(
+                f"Skipgram parameters n={n} and k={k} exceed the maximum allowed "
+                f"combinations per window ({MAX_SKIPGRAMS_COMBINATIONS_PER_WINDOW})."
+            )
 
     # Pads the sequence as desired by **kwargs.
     if "pad_left" in kwargs or "pad_right" in kwargs:
@@ -1010,6 +1258,7 @@ def skipgrams(sequence, n, k, **kwargs):
 ######################################################################
 # Binary Search in a File
 ######################################################################
+
 
 # inherited from pywordnet, by Oliver Steele
 def binary_search_file(file, key, cache=None, cacheDepth=-1):
@@ -1129,7 +1378,12 @@ def set_proxy(proxy, user=None, password=""):
 ######################################################################
 
 
-def elementtree_indent(elem, level=0):
+#: Bound recursion over nested XML so a deeply nested element raises ValueError
+#: instead of an uncaught RecursionError (CWE-674).
+MAX_XML_INDENT_DEPTH = 500
+
+
+def elementtree_indent(elem, level=0, max_depth=None):
     """
     Recursive function to indent an ElementTree._ElementInterface
     used for pretty printing. Run indent on elem and then output
@@ -1142,13 +1396,19 @@ def elementtree_indent(elem, level=0):
     :rtype:   ElementTree._ElementInterface
     :return:  Contents of elem indented to reflect its structure
     """
-
+    if max_depth is None:
+        max_depth = MAX_XML_INDENT_DEPTH
+    if level > max_depth:
+        raise ValueError(
+            f"XML nesting depth exceeds MAX_XML_INDENT_DEPTH ({max_depth}); "
+            "the input may be adversarially deep."
+        )
     i = "\n" + level * "  "
     if len(elem):
         if not elem.text or not elem.text.strip():
             elem.text = i + "  "
         for elem in elem:
-            elementtree_indent(elem, level + 1)
+            elementtree_indent(elem, level + 1, max_depth)
         if not elem.tail or not elem.tail.strip():
             elem.tail = i
     else:

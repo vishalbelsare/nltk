@@ -2,7 +2,7 @@
 #
 # Author: Dan Garrette <dhgarrette@gmail.com>
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # URL: <https://www.nltk.org/>
 # For license information, see LICENSE.TXT
 
@@ -37,17 +37,8 @@ from nltk.sem.logic import (
     is_indvar,
     unique_variable,
 )
-
-# Import Tkinter-based modules if they are available
-try:
-    from tkinter import Canvas, Tk
-    from tkinter.font import Font
-
-    from nltk.util import in_idle
-
-except ImportError:
-    # No need to print a warning here, nltk.draw has already printed one.
-    pass
+from nltk.termsec import safe_print
+from nltk.util import in_idle
 
 
 class DrtTokens(Tokens):
@@ -214,7 +205,7 @@ class DrtExpression:
         return DrtNegatedExpression(self)
 
     def __and__(self, other):
-        raise NotImplementedError()
+        return NotImplemented
 
     def __or__(self, other):
         assert isinstance(other, DrtExpression)
@@ -292,7 +283,7 @@ class DrtExpression:
         return "\n".join(self._pretty())
 
     def pretty_print(self):
-        print(self.pretty_format())
+        safe_print(self.pretty_format())
 
     def draw(self):
         DrsDrawer(self).draw()
@@ -518,7 +509,7 @@ class DRS(DrtExpression, Expression):
         if isinstance(other, DRS):
             if len(self.refs) == len(other.refs):
                 converted_other = other
-                for (r1, r2) in zip(self.refs, converted_other.refs):
+                for r1, r2 in zip(self.refs, converted_other.refs):
                     varex = self.make_VariableExpression(r1)
                     converted_other = converted_other.replace(r2, varex, True)
                 if self.consequent == converted_other.consequent and len(
@@ -869,7 +860,7 @@ class DrtConcatenation(DrtBooleanExpression):
             other_refs = other.get_refs()
             if len(self_refs) == len(other_refs):
                 converted_other = other
-                for (r1, r2) in zip(self_refs, other_refs):
+                for r1, r2 in zip(self_refs, other_refs):
                     varex = self.make_VariableExpression(r1)
                     converted_other = converted_other.replace(r2, varex, True)
                 return (
@@ -1009,12 +1000,63 @@ class AnaphoraResolutionException(Exception):
     pass
 
 
-def resolve_anaphora(expression, trail=[]):
+#: Upper bound on the number of (pronoun, discourse-referent) examinations a
+#: single ``resolve_anaphora`` call may perform. Each pronoun condition scans
+#: every referent on the trail and retains the compatible ones as candidate
+#: antecedents, so a DRS with N referents and N pronouns costs O(N**2) time and
+#: retained memory; a small crafted DRS string then pins the CPU and exhausts
+#: memory (CWE-770; CVE-2026-12873). Once this many examinations have been made,
+#: resolution raises ``AnaphoraResolutionException`` instead of running
+#: unbounded. Raise it if you legitimately need to resolve a larger discourse.
+MAX_ANAPHORA_OPERATIONS = 1_000_000
+
+
+class _AnaphoraBudget:
+    """Counts candidate-antecedent examinations and aborts runaway resolution.
+
+    The whole resolution shares one budget, so it bounds the total O(N**2) work
+    regardless of how the DRS is structured.
+    """
+
+    __slots__ = ("remaining", "limit")
+
+    def __init__(self, limit):
+        # ``limit`` comes from the module-global ``MAX_ANAPHORA_OPERATIONS``,
+        # which callers may override; validate it so a bad value fails clearly
+        # here rather than as an obscure error mid-resolution.
+        if not isinstance(limit, int) or limit < 1:
+            raise ValueError(
+                f"MAX_ANAPHORA_OPERATIONS must be a positive int, got {limit!r}"
+            )
+        self.remaining = limit
+        self.limit = limit
+
+    def spend(self):
+        self.remaining -= 1
+        if self.remaining < 0:
+            raise AnaphoraResolutionException(
+                "Refusing to resolve anaphora: examining candidate antecedents "
+                "exceeded the limit of %d (pronoun, referent) steps, which a DRS "
+                "with many referents and pronouns reaches at O(n**2) time and "
+                "memory (CWE-770). Resolve a smaller discourse, or raise "
+                "nltk.sem.drt.MAX_ANAPHORA_OPERATIONS." % self.limit
+            )
+
+
+def resolve_anaphora(expression, trail=[], budget=None):
+    # A shared budget bounds the total (pronoun, referent) examinations across
+    # the whole resolution: each pronoun scans every referent on the trail and
+    # retains the compatible ones, so a DRS with many referents and pronouns is
+    # O(N**2) in time and retained memory and a small crafted string can exhaust
+    # the process (CWE-770; CVE-2026-12873).
+    if budget is None:
+        budget = _AnaphoraBudget(MAX_ANAPHORA_OPERATIONS)
     if isinstance(expression, ApplicationExpression):
         if expression.is_pronoun_function():
             possible_antecedents = PossibleAntecedents()
             for ancestor in trail:
                 for ref in ancestor.get_refs():
+                    budget.spend()
                     refex = expression.make_VariableExpression(ref)
 
                     # ==========================================================
@@ -1031,14 +1073,18 @@ def resolve_anaphora(expression, trail=[]):
                 resolution = possible_antecedents
             return expression.make_EqualityExpression(expression.argument, resolution)
         else:
-            r_function = resolve_anaphora(expression.function, trail + [expression])
-            r_argument = resolve_anaphora(expression.argument, trail + [expression])
+            r_function = resolve_anaphora(
+                expression.function, trail + [expression], budget
+            )
+            r_argument = resolve_anaphora(
+                expression.argument, trail + [expression], budget
+            )
             return expression.__class__(r_function, r_argument)
 
     elif isinstance(expression, DRS):
         r_conds = []
         for cond in expression.conds:
-            r_cond = resolve_anaphora(cond, trail + [expression])
+            r_cond = resolve_anaphora(cond, trail + [expression], budget)
 
             # if the condition is of the form '(x = [])' then raise exception
             if isinstance(r_cond, EqualityExpression):
@@ -1056,7 +1102,9 @@ def resolve_anaphora(expression, trail=[]):
 
             r_conds.append(r_cond)
         if expression.consequent:
-            consequent = resolve_anaphora(expression.consequent, trail + [expression])
+            consequent = resolve_anaphora(
+                expression.consequent, trail + [expression], budget
+            )
         else:
             consequent = None
         return expression.__class__(expression.refs, r_conds, consequent)
@@ -1066,29 +1114,32 @@ def resolve_anaphora(expression, trail=[]):
 
     elif isinstance(expression, NegatedExpression):
         return expression.__class__(
-            resolve_anaphora(expression.term, trail + [expression])
+            resolve_anaphora(expression.term, trail + [expression], budget)
         )
 
     elif isinstance(expression, DrtConcatenation):
         if expression.consequent:
-            consequent = resolve_anaphora(expression.consequent, trail + [expression])
+            consequent = resolve_anaphora(
+                expression.consequent, trail + [expression], budget
+            )
         else:
             consequent = None
         return expression.__class__(
-            resolve_anaphora(expression.first, trail + [expression]),
-            resolve_anaphora(expression.second, trail + [expression]),
+            resolve_anaphora(expression.first, trail + [expression], budget),
+            resolve_anaphora(expression.second, trail + [expression], budget),
             consequent,
         )
 
     elif isinstance(expression, BinaryExpression):
         return expression.__class__(
-            resolve_anaphora(expression.first, trail + [expression]),
-            resolve_anaphora(expression.second, trail + [expression]),
+            resolve_anaphora(expression.first, trail + [expression], budget),
+            resolve_anaphora(expression.second, trail + [expression], budget),
         )
 
     elif isinstance(expression, LambdaExpression):
         return expression.__class__(
-            expression.variable, resolve_anaphora(expression.term, trail + [expression])
+            expression.variable,
+            resolve_anaphora(expression.term, trail + [expression], budget),
         )
 
 
@@ -1105,6 +1156,12 @@ class DrsDrawer:
         """
         master = None
         if not canvas:
+
+            # Only import tkinter if the user has indicated that they
+            # want to draw a UI. See issue #2949 for more info.
+            from tkinter import Canvas, Tk
+            from tkinter.font import Font
+
             master = Tk()
             master.title("DRT")
 
@@ -1307,7 +1364,7 @@ class DrsDrawer:
         right = command(DrtTokens.OPEN, right, centred_string_top)[0]
 
         # Handle each arg
-        for (i, arg) in enumerate(args):
+        for i, arg in enumerate(args):
             arg_drawing_top = self._get_centered_top(
                 y, line_height, arg._drawing_height
             )
@@ -1392,36 +1449,38 @@ class DrsDrawer:
 
 
 def demo():
-    print("=" * 20 + "TEST PARSE" + "=" * 20)
+    safe_print("=" * 20 + "TEST PARSE" + "=" * 20)
     dexpr = DrtExpression.fromstring
-    print(dexpr(r"([x,y],[sees(x,y)])"))
-    print(dexpr(r"([x],[man(x), walks(x)])"))
-    print(dexpr(r"\x.\y.([],[sees(x,y)])"))
-    print(dexpr(r"\x.([],[walks(x)])(john)"))
-    print(dexpr(r"(([x],[walks(x)]) + ([y],[runs(y)]))"))
-    print(dexpr(r"(([],[walks(x)]) -> ([],[runs(x)]))"))
-    print(dexpr(r"([x],[PRO(x), sees(John,x)])"))
-    print(dexpr(r"([x],[man(x), -([],[walks(x)])])"))
-    print(dexpr(r"([],[(([x],[man(x)]) -> ([],[walks(x)]))])"))
+    safe_print(dexpr(r"([x,y],[sees(x,y)])"))
+    safe_print(dexpr(r"([x],[man(x), walks(x)])"))
+    safe_print(dexpr(r"\x.\y.([],[sees(x,y)])"))
+    safe_print(dexpr(r"\x.([],[walks(x)])(john)"))
+    safe_print(dexpr(r"(([x],[walks(x)]) + ([y],[runs(y)]))"))
+    safe_print(dexpr(r"(([],[walks(x)]) -> ([],[runs(x)]))"))
+    safe_print(dexpr(r"([x],[PRO(x), sees(John,x)])"))
+    safe_print(dexpr(r"([x],[man(x), -([],[walks(x)])])"))
+    safe_print(dexpr(r"([],[(([x],[man(x)]) -> ([],[walks(x)]))])"))
 
-    print("=" * 20 + "Test fol()" + "=" * 20)
-    print(dexpr(r"([x,y],[sees(x,y)])").fol())
+    safe_print("=" * 20 + "Test fol()" + "=" * 20)
+    safe_print(dexpr(r"([x,y],[sees(x,y)])").fol())
 
-    print("=" * 20 + "Test alpha conversion and lambda expression equality" + "=" * 20)
+    safe_print(
+        "=" * 20 + "Test alpha conversion and lambda expression equality" + "=" * 20
+    )
     e1 = dexpr(r"\x.([],[P(x)])")
-    print(e1)
+    safe_print(e1)
     e2 = e1.alpha_convert(Variable("z"))
-    print(e2)
-    print(e1 == e2)
+    safe_print(e2)
+    safe_print(e1 == e2)
 
-    print("=" * 20 + "Test resolve_anaphora()" + "=" * 20)
-    print(resolve_anaphora(dexpr(r"([x,y,z],[dog(x), cat(y), walks(z), PRO(z)])")))
-    print(
+    safe_print("=" * 20 + "Test resolve_anaphora()" + "=" * 20)
+    safe_print(resolve_anaphora(dexpr(r"([x,y,z],[dog(x), cat(y), walks(z), PRO(z)])")))
+    safe_print(
         resolve_anaphora(dexpr(r"([],[(([x],[dog(x)]) -> ([y],[walks(y), PRO(y)]))])"))
     )
-    print(resolve_anaphora(dexpr(r"(([x,y],[]) + ([],[PRO(x)]))")))
+    safe_print(resolve_anaphora(dexpr(r"(([x,y],[]) + ([],[PRO(x)]))")))
 
-    print("=" * 20 + "Test pretty_print()" + "=" * 20)
+    safe_print("=" * 20 + "Test pretty_print()" + "=" * 20)
     dexpr(r"([],[])").pretty_print()
     dexpr(
         r"([],[([x],[big(x), dog(x)]) -> ([],[bark(x)]) -([x],[walk(x)])])"

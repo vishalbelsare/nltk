@@ -1,6 +1,6 @@
 # Natural Language Toolkit (NLTK)
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Authors: Steven Bird <stevenbird1@gmail.com>
 #          Edward Loper <edloper@gmail.com>
 # URL: <https://www.nltk.org/>
@@ -19,6 +19,13 @@ isort:skip_file
 """
 
 import os
+import importlib
+import sys
+
+# The terminal-output chokepoint has no nltk imports of its own, so it is bound
+# first: every import-time fallback below (the downloader GUI warning) uses it.
+from nltk.termsec import safe_print, sanitize_terminal
+
 
 # //////////////////////////////////////////////////////
 # Metadata
@@ -29,7 +36,13 @@ import os
 try:
     # If a VERSION file exists, use it!
     version_file = os.path.join(os.path.dirname(__file__), "VERSION")
-    with open(version_file) as infile:
+    from nltk.pathsec import open_package_resource
+
+    # Not an exemption: containment is enforced against the installed package
+    # directory, since VERSION ships beside the code and never in a data root.
+    with open_package_resource(
+        version_file, os.path.dirname(__file__), context="nltk.__version__"
+    ) as infile:
         __version__ = infile.read().strip()
 except NameError:
     __version__ = "unknown (running code interactively?)"
@@ -42,7 +55,7 @@ if __doc__ is not None:  # fix for the ``python -OO``
 
 # Copyright notice
 __copyright__ = """\
-Copyright (C) 2001-2021 NLTK Project.
+Copyright (C) 2001-2026 NLTK Project.
 
 Distributed and Licensed under the Apache License, Version 2.0,
 which is included by reference.
@@ -52,7 +65,7 @@ __license__ = "Apache License, Version 2.0"
 # Description of the toolkit, keywords, and the project's primary URL.
 __longdescr__ = """\
 The Natural Language Toolkit (NLTK) is a Python package for
-natural language processing.  NLTK requires Python 3.6, 3.7, 3.8, or 3.9."""
+natural language processing.  NLTK requires Python 3.10, 3.11, 3.12 or 3.13."""
 __keywords__ = [
     "NLP",
     "CL",
@@ -84,10 +97,10 @@ __classifiers__ = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Human Machine Interfaces",
@@ -161,14 +174,13 @@ from nltk.stem import *
 
 from nltk import lazyimport
 
-app = lazyimport.LazyModule("nltk.app", locals(), globals())
-chat = lazyimport.LazyModule("nltk.chat", locals(), globals())
-corpus = lazyimport.LazyModule("nltk.corpus", locals(), globals())
-draw = lazyimport.LazyModule("nltk.draw", locals(), globals())
-toolbox = lazyimport.LazyModule("nltk.toolbox", locals(), globals())
+app = lazyimport.LazyModule("app", locals(), globals())
+chat = lazyimport.LazyModule("chat", locals(), globals())
+corpus = lazyimport.LazyModule("corpus", locals(), globals())
+draw = lazyimport.LazyModule("draw", locals(), globals())
+toolbox = lazyimport.LazyModule("toolbox", locals(), globals())
 
 # Optional loading
-
 try:
     import numpy
 except ImportError:
@@ -178,11 +190,10 @@ else:
 
 from nltk.downloader import download, download_shell
 
-try:
-    import tkinter
-except ImportError:
-    pass
-else:
+# Check if tkinter exists without importing it to avoid crashes after
+# forks on macOS. Only nltk.app, nltk.draw, and demo modules should
+# have top-level tkinter imports. See #2949 for more details.
+if importlib.util.find_spec("tkinter"):
     try:
         from nltk.downloader import download_gui
     except RuntimeError as e:
@@ -190,7 +201,7 @@ else:
 
         warnings.warn(
             "Corpus downloader GUI not loaded "
-            "(RuntimeError during import: %s)" % str(e)
+            "(RuntimeError during import: %s)" % sanitize_terminal(e)
         )
 
 # explicitly import all top-level modules (ensuring
@@ -205,4 +216,4 @@ from nltk import tag, tbl, text, tokenize, translate, tree, util
 
 # FIXME:  override any accidentally imported demo, see https://github.com/nltk/nltk/issues/2116
 def demo():
-    print("To run the demo code for a module, type nltk.module.demo()")
+    safe_print("To run the demo code for a module, type nltk.module.demo()")

@@ -1,6 +1,6 @@
 # Natural Language Toolkit: vader
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: C.J. Hutto <Clayton.Hutto@gtri.gatech.edu>
 #         Ewan Klein <ewan@inf.ed.ac.uk> (modifications)
 #         Pierpaolo Pantone <24alsecondo@gmail.com> (modifications)
@@ -27,6 +27,7 @@ import string
 from itertools import product
 
 import nltk.data
+from nltk import redos
 from nltk.util import pairwise
 
 
@@ -192,7 +193,7 @@ class VaderConstants:
     }
 
     # for removing punctuation
-    REGEX_REMOVE_PUNCTUATION = re.compile(f"[{re.escape(string.punctuation)}]")
+    REGEX_REMOVE_PUNCTUATION = redos.compile(f"[{re.escape(string.punctuation)}]")
 
     PUNC_LIST = [
         ".",
@@ -356,6 +357,11 @@ class SentimentIntensityAnalyzer:
         Return a float for sentiment strength based on the input text.
         Positive values are positive valence, negative value are negative
         valence.
+
+        :note: Hashtags are not taken into consideration (e.g. #BAD is neutral). If you
+            are interested in processing the text in the hashtags too, then we recommend
+            preprocessing your data to remove the #, after which the hashtag text may be
+            matched as if it was a normal word in the sentence.
         """
         # text, words_and_emoticons, is_cap_diff = self.preprocess(text)
         sentitext = SentiText(
@@ -363,9 +369,19 @@ class SentimentIntensityAnalyzer:
         )
         sentiments = []
         words_and_emoticons = sentitext.words_and_emoticons
+        # Precompute the first index of each token once, in O(n). The loop below
+        # previously called ``words_and_emoticons.index(item)`` on every
+        # iteration -- an O(n) scan per token, i.e. O(n^2) overall on text with
+        # many distinct tokens, a remote CPU DoS (CWE-407). ``list.index``
+        # returns the first matching position, so this mapping yields the exact
+        # same indices in linear time.
+        first_index = {}
+        for idx, token in enumerate(words_and_emoticons):
+            if token not in first_index:
+                first_index[token] = idx
         for item in words_and_emoticons:
             valence = 0
-            i = words_and_emoticons.index(item)
+            i = first_index[item]
             if (
                 i < len(words_and_emoticons) - 1
                 and item.lower() == "kind"

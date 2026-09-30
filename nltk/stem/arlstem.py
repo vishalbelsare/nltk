@@ -1,7 +1,7 @@
 #
 # Natural Language Toolkit: ARLSTem Stemmer
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 #
 # Author: Kheireddine Abainia (x-programer) <k.abainia@gmail.com>
 # Algorithms: Kheireddine Abainia <k.abainia@gmail.com>
@@ -24,9 +24,10 @@ index, over-stemming index and stemming weight), and the results showed that
 ARLSTem is promising and producing high performances. This stemmer is not
 based on any dictionary and can be used on-line effectively.
 """
-import re
 
+from nltk import redos
 from nltk.stem.api import StemmerI
+from nltk.termsec import safe_print
 
 
 class ARLSTem(StemmerI):
@@ -41,9 +42,9 @@ class ARLSTem(StemmerI):
 
     def __init__(self):
         # different Alif with hamza
-        self.re_hamzated_alif = re.compile(r"[\u0622\u0623\u0625]")
-        self.re_alifMaqsura = re.compile(r"[\u0649]")
-        self.re_diacritics = re.compile(r"[\u064B-\u065F]")
+        self.re_hamzated_alif = redos.compile(r"[\u0622\u0623\u0625]")
+        self.re_alifMaqsura = redos.compile(r"[\u0649]")
+        self.re_diacritics = redos.compile(r"[\u064B-\u065F]")
 
         # Alif Laam, Laam Laam, Fa Laam, Fa Ba
         self.pr2 = ["\u0627\u0644", "\u0644\u0644", "\u0641\u0644", "\u0641\u0628"]
@@ -59,7 +60,7 @@ class ARLSTem(StemmerI):
         ]
 
         # Kaf Yaa, Kaf Miim
-        self.su2 = ["\u0643\u064A", "\u0643\u0645"]
+        self.su2 = ["\u0643\u064a", "\u0643\u0645"]
         # Ha Alif, Ha Miim
         self.su22 = ["\u0647\u0627", "\u0647\u0645"]
         # Kaf Miim Alif, Kaf Noon Shadda
@@ -68,34 +69,34 @@ class ARLSTem(StemmerI):
         self.su32 = ["\u0647\u0645\u0627", "\u0647\u0646\u0651"]
 
         # Alif Noon, Ya Noon, Waaw Noon
-        self.pl_si2 = ["\u0627\u0646", "\u064A\u0646", "\u0648\u0646"]
+        self.pl_si2 = ["\u0627\u0646", "\u064a\u0646", "\u0648\u0646"]
         # Taa Alif Noon, Taa Ya Noon
-        self.pl_si3 = ["\u062A\u0627\u0646", "\u062A\u064A\u0646"]
+        self.pl_si3 = ["\u062a\u0627\u0646", "\u062a\u064a\u0646"]
 
         # Alif Noon, Waaw Noon
         self.verb_su2 = ["\u0627\u0646", "\u0648\u0646"]
         # Siin Taa, Siin Yaa
-        self.verb_pr2 = ["\u0633\u062A", "\u0633\u064A"]
+        self.verb_pr2 = ["\u0633\u062a", "\u0633\u064a"]
         # Siin Alif, Siin Noon
         self.verb_pr22 = ["\u0633\u0627", "\u0633\u0646"]
         # Lam Noon, Lam Taa, Lam Yaa, Lam Hamza
         self.verb_pr33 = [
             "\u0644\u0646",
-            "\u0644\u062A",
-            "\u0644\u064A",
+            "\u0644\u062a",
+            "\u0644\u064a",
             "\u0644\u0623",
         ]
         # Taa Miim Alif, Taa Noon Shadda
-        self.verb_suf3 = ["\u062A\u0645\u0627", "\u062A\u0646\u0651"]
+        self.verb_suf3 = ["\u062a\u0645\u0627", "\u062a\u0646\u0651"]
         # Noon Alif, Taa Miim, Taa Alif, Waaw Alif
         self.verb_suf2 = [
             "\u0646\u0627",
-            "\u062A\u0645",
-            "\u062A\u0627",
+            "\u062a\u0645",
+            "\u062a\u0627",
             "\u0648\u0627",
         ]
         # Taa, Alif, Noon
-        self.verb_suf1 = ["\u062A", "\u0627", "\u0646"]
+        self.verb_suf1 = ["\u062a", "\u0627", "\u0646"]
 
     def stem(self, token):
         """
@@ -130,7 +131,7 @@ class ARLSTem(StemmerI):
                 return ps
             return token
         except ValueError as e:
-            print(e)
+            safe_print(e)
 
     def norm(self, token):
         """
@@ -143,7 +144,7 @@ class ARLSTem(StemmerI):
         # replace Hamzated Alif with Alif bare
         token = self.re_hamzated_alif.sub("\u0627", token)
         # replace alifMaqsura with Yaa
-        token = self.re_alifMaqsura.sub("\u064A", token)
+        token = self.re_alifMaqsura.sub("\u064a", token)
         # strip the Waaw from the word beginning if the remaining is 3 letters
         # at least
         if token.startswith("\u0648") and len(token) > 3:
@@ -219,7 +220,7 @@ class ARLSTem(StemmerI):
             for ps3 in self.pl_si3:
                 if token.endswith(ps3):
                     return token[:-3]
-        if len(token) > 3 and token.endswith("\u0627\u062A"):
+        if len(token) > 3 and token.endswith("\u0627\u062a"):
             return token[:-2]
         if len(token) > 3 and token.startswith("\u0627") and token[2] == "\u0627":
             return token[:2] + token[3:]
@@ -251,11 +252,11 @@ class ARLSTem(StemmerI):
         """
         stem the present prefixes and suffixes
         """
-        if len(token) > 5 and token.startswith("\u062A"):  # Taa
+        if len(token) > 5 and token.startswith("\u062a"):  # Taa
             for s2 in self.pl_si2:
                 if token.endswith(s2):
                     return token[1:-2]
-        if len(token) > 5 and token.startswith("\u064A"):  # Yaa
+        if len(token) > 5 and token.startswith("\u064a"):  # Yaa
             for s2 in self.verb_su2:
                 if token.endswith(s2):
                     return token[1:-2]
@@ -264,7 +265,7 @@ class ARLSTem(StemmerI):
             if len(token) > 5 and token.endswith("\u0648\u0627"):
                 return token[1:-2]
             # Yaa
-            if token.endswith("\u064A"):
+            if token.endswith("\u064a"):
                 return token[1:-1]
             # Alif
             if token.endswith("\u0627"):
@@ -273,10 +274,10 @@ class ARLSTem(StemmerI):
             if token.endswith("\u0646"):
                 return token[1:-1]
         # ^Yaa, Noon$
-        if len(token) > 4 and token.startswith("\u064A") and token.endswith("\u0646"):
+        if len(token) > 4 and token.startswith("\u064a") and token.endswith("\u0646"):
             return token[1:-1]
         # ^Taa, Noon$
-        if len(token) > 4 and token.startswith("\u062A") and token.endswith("\u0646"):
+        if len(token) > 4 and token.startswith("\u062a") and token.endswith("\u0646"):
             return token[1:-1]
 
     def verb_t2(self, token):
@@ -334,7 +335,7 @@ class ARLSTem(StemmerI):
             for pr1 in self.verb_suf1:
                 if token.startswith(pr1):
                     return token[1:]
-            if token.startswith("\u064A"):
+            if token.startswith("\u064a"):
                 return token[1:]
 
     def verb_t5(self, token):

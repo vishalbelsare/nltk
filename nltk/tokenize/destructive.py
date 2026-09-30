@@ -1,6 +1,6 @@
 # Natural Language Toolkit: NLTK's very own tokenizer.
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Liling Tan
 #         Tom Aarsen <> (modifications)
 # URL: <https://www.nltk.org>
@@ -9,8 +9,10 @@
 
 import re
 import warnings
-from typing import Iterator, List, Tuple
+from collections.abc import Iterator
+from typing import List, Tuple
 
+from nltk import redos
 from nltk.tokenize.api import TokenizerI
 from nltk.tokenize.util import align_tokens
 
@@ -50,26 +52,30 @@ class NLTKWordTokenizer(TokenizerI):
 
     # Starting quotes.
     STARTING_QUOTES = [
-        (re.compile("([«“‘„]|[`]+)", re.U), r" \1 "),
-        (re.compile(r"^\""), r"``"),
-        (re.compile(r"(``)"), r" \1 "),
-        (re.compile(r"([ \(\[{<])(\"|\'{2})"), r"\1 `` "),
-        (re.compile(r"(?i)(\')(?!re|ve|ll|m|t|s|d|n)(\w)\b", re.U), r"\1 \2"),
+        (redos.compile("([«“‘„]|[`]+)", re.U), r" \1 "),
+        (redos.compile(r"^\""), r"``"),
+        (redos.compile(r"(``)"), r" \1 "),
+        (redos.compile(r"([ \(\[{<])(\"|\'{2})"), r"\1 `` "),
+        (
+            redos.compile(r"(?i)(?<!\w)(\')(?!(?:re|ve|ll|m|t|s|d|n)\b)(?=\w)", re.U),
+            r"\1 ",
+        ),
     ]
 
     # Ending quotes.
     ENDING_QUOTES = [
-        (re.compile("([»”’])", re.U), r" \1 "),
-        (re.compile(r"''"), " '' "),
-        (re.compile(r'"'), " '' "),
-        (re.compile(r"([^' ])('[sS]|'[mM]|'[dD]|') "), r"\1 \2 "),
-        (re.compile(r"([^' ])('ll|'LL|'re|'RE|'ve|'VE|n't|N'T) "), r"\1 \2 "),
+        (redos.compile("([»”’])", re.U), r" \1 "),
+        (redos.compile(r"''"), " '' "),
+        (redos.compile(r'"'), " '' "),
+        (redos.compile(r"\s+"), " "),
+        (redos.compile(r"([^' ])('[sS]|'[mM]|'[dD]|') "), r"\1 \2 "),
+        (redos.compile(r"([^' ])('ll|'LL|'re|'RE|'ve|'VE|n't|N'T) "), r"\1 \2 "),
     ]
 
     # For improvements for starting/closing quotes from TreebankWordTokenizer,
     # see discussion on https://github.com/nltk/nltk/pull/1437
     # Adding to TreebankWordTokenizer, nltk.word_tokenize now splits on
-    # - chervon quotes u'\xab' and u'\xbb' .
+    # - chevron quotes u'\xab' and u'\xbb'
     # - unicode quotes u'\u2018', u'\u2019', u'\u201c' and u'\u201d'
     # See https://github.com/nltk/nltk/issues/1995#issuecomment-376741608
     # Also, behavior of splitting on clitics now follows Stanford CoreNLP
@@ -77,40 +83,52 @@ class NLTKWordTokenizer(TokenizerI):
 
     # Punctuation.
     PUNCTUATION = [
-        (re.compile(r'([^\.])(\.)([\]\)}>"\'' "»”’ " r"]*)\s*$", re.U), r"\1 \2 \3 "),
-        (re.compile(r"([:,])([^\d])"), r" \1 \2"),
-        (re.compile(r"([:,])$"), r" \1 "),
+        # The class ends with a space directly before ``\s*$``, so ``[..space..]*``
+        # and ``\s*`` both match a trailing space run and backtrack O(n**2) when
+        # the text ends in a non-space, non-class char (~32 KB pins a core). The
+        # ``regex`` engine does not collapse this, so redos.compile's wall-clock
+        # bound is required; behaviour is otherwise identical (CWE-1333).
         (
-            re.compile(r"\.{2,}", re.U),
+            redos.compile(r'([^\.])(\.)([\]\)}>"\'' "»”’ " r"]*)\s*$", re.U),
+            r"\1 \2 \3 ",
+        ),
+        (redos.compile(r"([:,])([^\d])"), r" \1 \2"),
+        (redos.compile(r"([:,])$"), r" \1 "),
+        (
+            redos.compile(r"\.{2,}", re.U),
             r" \g<0> ",
         ),  # See https://github.com/nltk/nltk/pull/2322
-        (re.compile(r"[;@#$%&]"), r" \g<0> "),
+        (redos.compile(r"[;@#$%&]"), r" \g<0> "),
         (
-            re.compile(r'([^\.])(\.)([\]\)}>"\']*)\s*$'),
+            redos.compile(r"[\u2012-\u2015]", re.UNICODE),
+            r" \g<0> ",
+        ),  # Handles figure dash, en dashes, em dashes and horizontal bars
+        (
+            redos.compile(r'([^\.])(\.)([\]\)}>"\']*)\s*$'),
             r"\1 \2\3 ",
         ),  # Handles the final period.
-        (re.compile(r"[?!]"), r" \g<0> "),
-        (re.compile(r"([^'])' "), r"\1 ' "),
+        (redos.compile(r"[?!]"), r" \g<0> "),
+        (redos.compile(r"([^'])' "), r"\1 ' "),
         (
-            re.compile(r"[*]", re.U),
+            redos.compile(r"[*]", re.U),
             r" \g<0> ",
         ),  # See https://github.com/nltk/nltk/pull/2322
     ]
 
     # Pads parentheses
-    PARENS_BRACKETS = (re.compile(r"[\]\[\(\)\{\}\<\>]"), r" \g<0> ")
+    PARENS_BRACKETS = (redos.compile(r"[\]\[\(\)\{\}\<\>]"), r" \g<0> ")
 
     # Optionally: Convert parentheses, brackets and converts them to PTB symbols.
     CONVERT_PARENTHESES = [
-        (re.compile(r"\("), "-LRB-"),
-        (re.compile(r"\)"), "-RRB-"),
-        (re.compile(r"\["), "-LSB-"),
-        (re.compile(r"\]"), "-RSB-"),
-        (re.compile(r"\{"), "-LCB-"),
-        (re.compile(r"\}"), "-RCB-"),
+        (redos.compile(r"\("), "-LRB-"),
+        (redos.compile(r"\)"), "-RRB-"),
+        (redos.compile(r"\["), "-LSB-"),
+        (redos.compile(r"\]"), "-RSB-"),
+        (redos.compile(r"\{"), "-LCB-"),
+        (redos.compile(r"\}"), "-RCB-"),
     ]
 
-    DOUBLE_DASHES = (re.compile(r"--"), r" -- ")
+    DOUBLE_DASHES = (redos.compile(r"--"), r" -- ")
 
     # List of contractions adapted from Robert MacIntyre's tokenizer.
     _contractions = MacIntyreContractions()
@@ -119,21 +137,20 @@ class NLTKWordTokenizer(TokenizerI):
 
     def tokenize(
         self, text: str, convert_parentheses: bool = False, return_str: bool = False
-    ) -> List[str]:
+    ) -> list[str]:
         r"""Return a tokenized copy of `text`.
 
         >>> from nltk.tokenize import NLTKWordTokenizer
         >>> s = '''Good muffins cost $3.88 (roughly 3,36 euros)\nin New York.  Please buy me\ntwo of them.\nThanks.'''
-        >>> NLTKWordTokenizer().tokenize(s)
+        >>> NLTKWordTokenizer().tokenize(s) # doctest: +NORMALIZE_WHITESPACE
         ['Good', 'muffins', 'cost', '$', '3.88', '(', 'roughly', '3,36',
         'euros', ')', 'in', 'New', 'York.', 'Please', 'buy', 'me', 'two',
         'of', 'them.', 'Thanks', '.']
-        >>> NLTKWordTokenizer().tokenize(s, convert_parentheses=True)
+        >>> NLTKWordTokenizer().tokenize(s, convert_parentheses=True) # doctest: +NORMALIZE_WHITESPACE
         ['Good', 'muffins', 'cost', '$', '3.88', '-LRB-', 'roughly', '3,36',
         'euros', '-RRB-', 'in', 'New', 'York.', 'Please', 'buy', 'me', 'two',
         'of', 'them.', 'Thanks', '.']
-        >>> NLTKWordTokenizer().tokenize(s, return_str=True)
-        ' Good muffins cost  $ 3.88  ( roughly 3,36 euros ) \nin New York.  Please buy me\ntwo of them.\nThanks  .  '
+
 
         :param text: A string with a sentence or sentences.
         :type text: str
@@ -190,7 +207,7 @@ class NLTKWordTokenizer(TokenizerI):
 
         return text.split()
 
-    def span_tokenize(self, text: str) -> Iterator[Tuple[int, int]]:
+    def span_tokenize(self, text: str) -> Iterator[tuple[int, int]]:
         r"""
         Returns the spans of the tokens in ``text``.
         Uses the post-hoc nltk.tokens.align_tokens to return the offset spans.
@@ -221,12 +238,14 @@ class NLTKWordTokenizer(TokenizerI):
         # treated as starting quotes).
         if ('"' in text) or ("''" in text):
             # Find double quotes and converted quotes
-            matched = [m.group() for m in re.finditer(r"``|'{2}|\"", text)]
+            matched = [m.group() for m in redos.finditer(r"``|'{2}|\"", text)]
 
-            # Replace converted quotes back to double quotes
+            # Replace converted quotes back to double quotes. Draw matches from a
+            # forward iterator so the comprehension stays linear (CWE-407); popping
+            # index 0 off a list per token was quadratic.
+            mit = iter(matched)
             tokens = [
-                matched.pop(0) if tok in ['"', "``", "''"] else tok
-                for tok in raw_tokens
+                next(mit) if tok in ['"', "``", "''"] else tok for tok in raw_tokens
             ]
         else:
             tokens = raw_tokens

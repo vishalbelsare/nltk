@@ -1,12 +1,13 @@
 # Natural Language Toolkit: Tokenizer Utilities
 #
-# Copyright (C) 2001-2021 NLTK Project
+# Copyright (C) 2001-2026 NLTK Project
 # Author: Steven Bird <stevenbird1@gmail.com>
 # URL: <https://www.nltk.org>
 # For license information, see LICENSE.TXT
 
-from re import finditer
 from xml.sax.saxutils import escape, unescape
+
+from nltk import redos
 
 
 def string_span_tokenize(s, sep):
@@ -17,7 +18,7 @@ def string_span_tokenize(s, sep):
         >>> from nltk.tokenize.util import string_span_tokenize
         >>> s = '''Good muffins cost $3.88\nin New York.  Please buy me
         ... two of them.\n\nThanks.'''
-        >>> list(string_span_tokenize(s, " "))
+        >>> list(string_span_tokenize(s, " ")) # doctest: +NORMALIZE_WHITESPACE
         [(0, 4), (5, 12), (13, 17), (18, 26), (27, 30), (31, 36), (37, 37),
         (38, 44), (45, 48), (49, 55), (56, 58), (59, 73)]
 
@@ -51,7 +52,7 @@ def regexp_span_tokenize(s, regexp):
         >>> from nltk.tokenize.util import regexp_span_tokenize
         >>> s = '''Good muffins cost $3.88\nin New York.  Please buy me
         ... two of them.\n\nThanks.'''
-        >>> list(regexp_span_tokenize(s, r'\s'))
+        >>> list(regexp_span_tokenize(s, r'\s')) # doctest: +NORMALIZE_WHITESPACE
         [(0, 4), (5, 12), (13, 17), (18, 23), (24, 26), (27, 30), (31, 36),
         (38, 44), (45, 48), (49, 51), (52, 55), (56, 58), (59, 64), (66, 73)]
 
@@ -61,8 +62,14 @@ def regexp_span_tokenize(s, regexp):
     :type regexp: str
     :rtype: iter(tuple(int, int))
     """
+    # ``regexp`` is caller-supplied. A bare string is compiled through ``redos``
+    # so a pathological separator pattern cannot hang the process (CWE-1333); an
+    # already-compiled pattern (e.g. a ``redos.TimedPattern`` from
+    # ``RegexpTokenizer``) keeps its own timeout via its ``.finditer``.
+    if isinstance(regexp, str):
+        regexp = redos.compile(regexp)
     left = 0
-    for m in finditer(regexp, s):
+    for m in regexp.finditer(s):
         right, next = m.span()
         if right != left:
             yield left, right
@@ -78,7 +85,7 @@ def spans_to_relative(spans):
         >>> from nltk.tokenize.util import spans_to_relative
         >>> s = '''Good muffins cost $3.88\nin New York.  Please buy me
         ... two of them.\n\nThanks.'''
-        >>> list(spans_to_relative(WhitespaceTokenizer().span_tokenize(s)))
+        >>> list(spans_to_relative(WhitespaceTokenizer().span_tokenize(s))) # doctest: +NORMALIZE_WHITESPACE
         [(0, 4), (1, 7), (1, 4), (1, 5), (1, 2), (1, 3), (1, 5), (2, 6),
         (1, 3), (1, 2), (1, 3), (1, 2), (1, 5), (2, 7)]
 
@@ -166,7 +173,7 @@ def is_cjk(character):
     [(4352, 4607), (11904, 42191), (43072, 43135), (44032, 55215), (63744, 64255), (65072, 65103), (65381, 65500), (131072, 196607)]
     >>> is_cjk(u'\u33fe')
     True
-    >>> is_cjk(u'\uFE5F')
+    >>> is_cjk(u'\ufe5f')
     False
 
     :param character: The character that needs to be checked.
